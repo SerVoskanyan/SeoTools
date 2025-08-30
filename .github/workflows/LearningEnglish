@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Помощник по словам</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+        }
+
+        .correct-answer {
+            background-color: #4CAF50; /* Green */
+            color: white;
+            animation: bounceIn 0.5s;
+        }
+
+        .incorrect-answer {
+            background-color: #f44336; /* Red */
+            color: white;
+            animation: shake 0.5s;
+        }
+        
+        @keyframes bounceIn {
+            0% { transform: scale(0.9); opacity: 0; }
+            50% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(1); }
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-5px); }
+            40%, 80% { transform: translateX(5px); }
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background-color: #9ca3af;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background-color: #e5e7eb;
+        }
+    </style>
+</head>
+<body class="p-4">
+    <div class="max-w-xl w-full bg-white rounded-3xl shadow-xl p-6 sm:p-8 space-y-6 flex flex-col items-center">
+        <h1 class="text-3xl font-extrabold text-center text-gray-800">Помощник по словам</h1>
+        <p class="text-center text-gray-500">Практикуйтесь в переводе слов с английского на русский</p>
+
+        <!-- Welcome View -->
+        <div id="welcome-view" class="flex flex-col items-center justify-center space-y-6 p-8">
+            <h2 class="text-2xl font-bold text-gray-800">Приветствуем!</h2>
+            <p class="text-center text-gray-600">Пожалуйста, введите ваше имя, чтобы начать тест.</p>
+            <input type="text" id="user-name-input" placeholder="Ваше имя" class="w-full p-3 rounded-lg border-2 border-gray-300 focus:outline-none focus:border-indigo-500 transition-colors">
+            <button id="start-test-btn" class="w-full bg-indigo-500 text-white font-bold py-3 px-6 rounded-xl transition-all hover:bg-indigo-600 focus:outline-none focus:ring-4 focus:ring-indigo-300">
+                Начать
+            </button>
+        </div>
+
+        <!-- Loading View (hidden initially) -->
+        <div id="loading-view" class="hidden flex-col items-center justify-center space-y-4 p-8">
+            <div class="w-16 h-16 border-4 border-dashed rounded-full border-indigo-500 animate-spin"></div>
+            <p class="text-lg font-semibold text-gray-600">Загрузка изображений...</p>
+            <p class="text-sm text-gray-400">Пожалуйста, подождите.</p>
+        </div>
+
+        <!-- Navigation Buttons -->
+        <div id="navigation-buttons" class="hidden flex-col sm:flex-row gap-4 mb-4 w-full">
+            <button id="show-mistakes-btn" class="w-full bg-yellow-500 text-white font-bold py-3 px-6 rounded-xl transition-all hover:bg-yellow-600 focus:outline-none focus:ring-4 focus:ring-yellow-300">
+                Мои ошибки (<span id="mistakes-count">0</span>)
+            </button>
+            <button id="show-my-words-btn" class="w-full bg-purple-500 text-white font-bold py-3 px-6 rounded-xl transition-all hover:bg-purple-600 focus:outline-none focus:ring-4 focus:ring-purple-300">
+                Мои слова (<span id="my-words-count">0</span>)
+            </button>
+            <button id="start-new-test-btn" class="w-full bg-indigo-500 text-white font-bold py-3 px-6 rounded-xl transition-all hover:bg-indigo-600 focus:outline-none focus:ring-4 focus:ring-indigo-300">
+                Новый тест
+            </button>
+        </div>
+        
+        <!-- Main Quiz View -->
+        <div id="quiz-view" class="hidden space-y-6 w-full">
+            <div id="word-card" class="bg-gray-100 p-6 rounded-2xl flex flex-col items-center shadow-inner text-center">
+                <div class="w-48 h-48 sm:w-64 sm:h-64 rounded-xl mb-4 shadow-md overflow-hidden flex items-center justify-center bg-gray-200">
+                    <img id="word-image" class="w-full h-full object-cover" alt="Изображение слова">
+                </div>
+                <div class="space-y-2">
+                    <div id="word-text" class="text-4xl sm:text-5xl font-bold text-gray-800"></div>
+                    <div id="word-translation" class="text-xl text-gray-600"></div>
+                </div>
+            </div>
+
+            <div id="answers-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full">
+                <!-- Answer buttons will be injected here -->
+            </div>
+            
+            <div id="feedback-message" class="text-center text-xl font-semibold mt-4"></div>
+        </div>
+
+        <!-- Mistakes View -->
+        <div id="mistakes-view" class="hidden space-y-4 w-full">
+            <h2 class="text-2xl font-bold text-gray-800">Слова, в которых вы ошиблись</h2>
+            <div id="mistakes-list" class="bg-gray-100 p-4 rounded-xl max-h-96 overflow-y-auto custom-scrollbar shadow-inner">
+                <!-- Mistakes will be listed here -->
+            </div>
+            <div id="mistakes-actions" class="flex flex-col sm:flex-row gap-4 w-full">
+                <button id="practice-mistakes-btn" class="w-full bg-yellow-500 text-white font-bold py-3 px-6 rounded-xl transition-all hover:bg-yellow-600 focus:outline-none focus:ring-4 focus:ring-yellow-300">
+                    Пройтись по ошибкам
+                </button>
+                <button id="reset-mistakes-btn" class="w-full bg-red-500 text-white font-bold py-3 px-6 rounded-xl transition-all hover:bg-red-600 focus:outline-none focus:ring-4 focus:ring-red-300">
+                    Сбросить список ошибок
+                </button>
+            </div>
+        </div>
+        
+        <!-- Mistakes Complete View -->
+        <div id="mistakes-complete-view" class="hidden space-y-4 w-full">
+            <div class="bg-green-100 border border-green-400 text-green-700 rounded-xl p-4 text-center text-lg font-semibold">
+                Вы сегодня сделали исправление ошибки!
+            </div>
+            <button id="go-to-all-words-btn" class="w-full bg-indigo-500 text-white font-bold py-3 px-6 rounded-xl transition-all hover:bg-indigo-600 focus:outline-none focus:ring-4 focus:ring-indigo-300">
+                Пройти тест со всеми словами
+            </button>
+        </div>
+
+        <!-- My Words View -->
+        <div id="my-words-view" class="hidden space-y-6 w-full">
+            <h2 class="text-2xl font-bold text-gray-800">Мои слова</h2>
+            <div class="space-y-4">
+                <div class="flex flex-col sm:flex-row gap-2">
+                    <input type="text" id="my-word-en" placeholder="Слово на английском" class="w-full p-3 rounded-lg border-2 border-gray-300 focus:outline-none focus:border-purple-500 transition-colors">
+                    <input type="text" id="my-word-ru" placeholder="Перевод на русском" class="w-full p-3 rounded-lg border-2 border-gray-300 focus:outline-none focus:border-purple-500 transition-colors">
+                    <button id="add-my-word-btn" class="bg-purple-500 text-white font-bold py-3 px-6 rounded-xl transition-all hover:bg-purple-600 focus:outline-none focus:ring-4 focus:ring-purple-300">
+                        Добавить
+                    </button>
+                </div>
+            </div>
+            <div id="my-words-list" class="bg-gray-100 p-4 rounded-xl max-h-96 overflow-y-auto custom-scrollbar shadow-inner">
+                <!-- My words will be listed here -->
+            </div>
+            <div class="flex flex-col sm:flex-row gap-4 w-full">
+                <button id="practice-my-words-btn" class="w-full bg-purple-500 text-white font-bold py-3 px-6 rounded-xl transition-all hover:bg-purple-600 focus:outline-none focus:ring-4 focus:ring-purple-300">
+                    Пройтись по моим словам
+                </button>
+                <button id="reset-my-words-btn" class="w-full bg-red-500 text-white font-bold py-3 px-6 rounded-xl transition-all hover:bg-red-600 focus:outline-none focus:ring-4 focus:ring-red-300">
+                    Сбросить список
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // Default word list
+        const defaultWords = [
+            { english: 'Apple', russian: 'Яблоко' },
+            { english: 'House', russian: 'Дом' },
+            { english: 'Cat', russian: 'Кошка' },
+            { english: 'Dog', russian: 'Собака' },
+            { english: 'Book', russian: 'Книга' },
+            { english: 'Car', russian: 'Машина' },
+            { english: 'Sun', russian: 'Солнце' },
+            { english: 'Water', russian: 'Вода' },
+            { english: 'Tree', russian: 'Дерево' },
+            { english: 'Computer', russian: 'Компьютер' },
+            { english: 'Friend', russian: 'Друг' },
+            { english: 'Food', russian: 'Еда' },
+        ];
+
+        let quizWords = [];
+        let mistakes = JSON.parse(localStorage.getItem('mistakes')) || [];
+        let customWords = JSON.parse(localStorage.getItem('customWords')) || [];
+        let currentWordIndex = 0;
+        const imageCache = {};
+        let imagesLoadedPromise;
+
+        // UI elements
+        const welcomeView = document.getElementById('welcome-view');
+        const userNameInput = document.getElementById('user-name-input');
+        const startTestBtn = document.getElementById('start-test-btn');
+        const loadingView = document.getElementById('loading-view');
+        const navigationButtons = document.getElementById('navigation-buttons');
+        const quizView = document.getElementById('quiz-view');
+        const mistakesView = document.getElementById('mistakes-view');
+        const mistakesCompleteView = document.getElementById('mistakes-complete-view');
+        const myWordsView = document.getElementById('my-words-view');
+        const wordText = document.getElementById('word-text');
+        const wordImage = document.getElementById('word-image');
+        const wordTranslation = document.getElementById('word-translation');
+        const answersGrid = document.getElementById('answers-grid');
+        const feedbackMessage = document.getElementById('feedback-message');
+        const mistakesCountSpan = document.getElementById('mistakes-count');
+        const myWordsCountSpan = document.getElementById('my-words-count');
+        const mistakesList = document.getElementById('mistakes-list');
+        const myWordsList = document.getElementById('my-words-list');
+        const myWordEnInput = document.getElementById('my-word-en');
+        const myWordRuInput = document.getElementById('my-word-ru');
+        
+        // Buttons
+        const showMistakesBtn = document.getElementById('show-mistakes-btn');
+        const showMyWordsBtn = document.getElementById('show-my-words-btn');
+        const startNewTestBtn = document.getElementById('start-new-test-btn');
+        const practiceMistakesBtn = document.getElementById('practice-mistakes-btn');
+        const resetMistakesBtn = document.getElementById('reset-mistakes-btn');
+        const goToAllWordsBtn = document.getElementById('go-to-all-words-btn');
+        const addMyWordBtn = document.getElementById('add-my-word-btn');
+        const practiceMyWordsBtn = document.getElementById('practice-my-words-btn');
+        const resetMyWordsBtn = document.getElementById('reset-my-words-btn');
+
+        let quizMode = 'all';
+
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
+
+        function saveMistakes() {
+            localStorage.setItem('mistakes', JSON.stringify(mistakes));
+            updateMistakesCount();
+        }
+
+        function saveCustomWords() {
+            localStorage.setItem('customWords', JSON.stringify(customWords));
+            updateMyWordsCount();
+        }
+        
+        function updateMistakesCount() {
+            mistakesCountSpan.textContent = mistakes.length;
+        }
+
+        function updateMyWordsCount() {
+            myWordsCountSpan.textContent = customWords.length;
+        }
+        
+        async function fetchImage(prompt) {
+            if (imageCache[prompt]) {
+                return imageCache[prompt];
+            }
+
+            const apiKey = "";
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${apiKey}`;
+            
+            try {
+                const payload = {
+                    contents: [{
+                        parts: [{ text: `A simple, colorful cartoon drawing of a ${prompt}.` }]
+                    }],
+                    generationConfig: {
+                        responseModalities: ['TEXT', 'IMAGE']
+                    },
+                };
+                
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                const base64Data = result?.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
+                
+                if (base64Data) {
+                    const imageUrl = `data:image/png;base64,${base64Data}`;
+                    imageCache[prompt] = imageUrl; // Cache the image URL
+                    return imageUrl;
+                } else {
+                    throw new Error('No image data received.');
+                }
+            } catch (error) {
+                console.error("Error generating image:", error);
+                // Fallback to a placeholder image
+                return 'https://placehold.co/250x250/E0E0E0/000000?text=Error';
+            }
+        }
+        
+        function preloadImages() {
+            const allWords = [...defaultWords, ...customWords];
+            imagesLoadedPromise = Promise.all(allWords.map(word => fetchImage(word.english)));
+        }
+
+        async function displayCurrentWord() {
+            wordTranslation.textContent = '';
+            const currentWord = quizWords[currentWordIndex];
+            wordText.textContent = currentWord.english;
+            
+            wordImage.src = imageCache[currentWord.english];
+            
+            const allWords = [...defaultWords, ...customWords];
+            const correctTranslation = currentWord.russian;
+            const incorrectTranslations = allWords
+                .filter(w => w.russian !== correctTranslation)
+                .map(w => w.russian);
+            shuffleArray(incorrectTranslations);
+            const options = [correctTranslation, ...incorrectTranslations.slice(0, 3)];
+            shuffleArray(options);
+
+            answersGrid.innerHTML = '';
+            options.forEach(option => {
+                const button = document.createElement('button');
+                button.textContent = option;
+                button.className = 'bg-gray-200 text-gray-800 font-bold py-4 px-6 rounded-xl transition-colors hover:bg-gray-300 focus:outline-none focus:ring-4 focus:ring-gray-300';
+                button.onclick = () => handleAnswer(button, option, correctTranslation);
+                answersGrid.appendChild(button);
+            });
+
+            feedbackMessage.textContent = '';
+        }
+        
+        function handleAnswer(button, selectedAnswer, correctAnswer) {
+            answersGrid.querySelectorAll('button').forEach(btn => btn.disabled = true);
+            wordTranslation.textContent = correctAnswer;
+            
+            if (selectedAnswer === correctAnswer) {
+                button.classList.add('correct-answer');
+                feedbackMessage.textContent = 'Правильно!';
+                feedbackMessage.classList.add('text-green-600');
+                if (quizMode === 'mistakes') {
+                    const wordToRemove = quizWords[currentWordIndex];
+                    mistakes = mistakes.filter(w => w.english !== wordToRemove.english);
+                    saveMistakes();
+                }
+            } else {
+                button.classList.add('incorrect-answer');
+                feedbackMessage.textContent = 'Неправильно. Правильный ответ: ' + correctAnswer;
+                feedbackMessage.classList.add('text-red-600');
+                const wordToAdd = quizWords[currentWordIndex];
+                if (!mistakes.some(w => w.english === wordToAdd.english)) {
+                    mistakes.push(wordToAdd);
+                    saveMistakes();
+                }
+            }
+
+            setTimeout(() => {
+                currentWordIndex++;
+                if (currentWordIndex < quizWords.length) {
+                    displayCurrentWord();
+                } else {
+                    endQuiz();
+                }
+            }, 1500);
+        }
+
+        function endQuiz() {
+            answersGrid.innerHTML = '';
+            wordText.textContent = 'Тест завершен!';
+            wordImage.src = 'https://placehold.co/250x250/C8E6C9/000000?text=Done!';
+            wordTranslation.textContent = '';
+            feedbackMessage.textContent = '';
+            if (quizMode === 'mistakes') {
+                showMistakesComplete();
+            } else {
+                showAllWordsComplete();
+            }
+        }
+
+        function showAllWordsComplete() {
+            feedbackMessage.textContent = `Вы ответили на все ${quizWords.length} слов. Попробуйте еще раз!`;
+        }
+
+        function showMistakesComplete() {
+            quizView.classList.add('hidden');
+            mistakesView.classList.add('hidden');
+            mistakesCompleteView.classList.remove('hidden');
+        }
+
+        function startQuiz(list = defaultWords) {
+            quizMode = 'all';
+            quizWords = shuffleArray([...list]);
+            currentWordIndex = 0;
+            quizView.classList.remove('hidden');
+            mistakesView.classList.add('hidden');
+            myWordsView.classList.add('hidden');
+            mistakesCompleteView.classList.add('hidden');
+            navigationButtons.classList.remove('hidden');
+            displayCurrentWord();
+        }
+
+        function startMyWordsQuiz() {
+            if (customWords.length === 0) {
+                feedbackMessage.textContent = 'Ваш список слов пуст. Добавьте несколько слов, чтобы начать тест.';
+                feedbackMessage.classList.add('text-red-600');
+                return;
+            }
+            startQuiz(customWords);
+            quizMode = 'myWords';
+        }
+
+        function startMistakesQuiz() {
+            if (mistakes.length === 0) {
+                feedbackMessage.textContent = 'Список ошибок пуст. Ответьте на несколько слов неправильно, чтобы начать.';
+                feedbackMessage.classList.add('text-red-600');
+                return;
+            }
+            startQuiz(mistakes);
+            quizMode = 'mistakes';
+        }
+
+        function showMistakes() {
+            quizView.classList.add('hidden');
+            myWordsView.classList.add('hidden');
+            mistakesView.classList.remove('hidden');
+            mistakesCompleteView.classList.add('hidden');
+            if (mistakes.length === 0) {
+                mistakesList.innerHTML = `<p class="text-center text-gray-500">Пока у вас нет ошибок. Отлично!</p>`;
+                practiceMistakesBtn.disabled = true;
+                resetMistakesBtn.disabled = true;
+            } else {
+                practiceMistakesBtn.disabled = false;
+                resetMistakesBtn.disabled = false;
+                mistakesList.innerHTML = mistakes.map(word => 
+                    `<div class="p-4 mb-2 bg-red-50 rounded-lg flex items-center space-x-4">
+                        <img src="${imageCache[word.english] || 'https://placehold.co/48x48/E0E0E0/000000?text=Image'}" class="w-12 h-12 rounded-full" alt="${word.english}">
+                        <div>
+                            <p class="font-bold text-gray-800">${word.english}</p>
+                            <p class="text-gray-600">${word.russian}</p>
+                        </div>
+                    </div>`
+                ).join('');
+            }
+        }
+
+        function showMyWords() {
+            quizView.classList.add('hidden');
+            mistakesView.classList.add('hidden');
+            myWordsView.classList.remove('hidden');
+            mistakesCompleteView.classList.add('hidden');
+            renderMyWordsList();
+        }
+
+        function renderMyWordsList() {
+            myWordsList.innerHTML = customWords.map((word, index) =>
+                `<div class="p-4 mb-2 bg-purple-50 rounded-lg flex items-center justify-between space-x-4">
+                    <div>
+                        <p class="font-bold text-gray-800">${word.english}</p>
+                        <p class="text-gray-600">${word.russian}</p>
+                    </div>
+                    <button onclick="deleteMyWord(${index})" class="text-red-500 hover:text-red-700 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                    </button>
+                </div>`
+            ).join('');
+        }
+        
+        function addMyWord() {
+            const english = myWordEnInput.value.trim();
+            const russian = myWordRuInput.value.trim();
+            if (english && russian) {
+                customWords.push({ english, russian });
+                saveCustomWords();
+                myWordEnInput.value = '';
+                myWordRuInput.value = '';
+                renderMyWordsList();
+                preloadImages(); // Preload the new word's image
+            }
+        }
+
+        function deleteMyWord(index) {
+            customWords.splice(index, 1);
+            saveCustomWords();
+            renderMyWordsList();
+        }
+        
+        function resetMistakes() {
+            const confirmReset = () => {
+                mistakes = [];
+                saveMistakes();
+                showMistakes();
+                document.body.removeChild(dialog);
+            };
+            createConfirmationDialog('Вы уверены, что хотите сбросить список ошибок?', confirmReset);
+        }
+
+        function resetMyWords() {
+            const confirmReset = () => {
+                customWords = [];
+                saveCustomWords();
+                showMyWords();
+                document.body.removeChild(dialog);
+            };
+            createConfirmationDialog('Вы уверены, что хотите сбросить список ваших слов?', confirmReset);
+        }
+
+        function createConfirmationDialog(message, onConfirm) {
+            const dialog = document.createElement('div');
+            dialog.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50';
+            dialog.innerHTML = `
+                <div class="bg-white p-6 rounded-lg shadow-xl text-center space-y-4 max-w-sm">
+                    <p class="text-lg font-semibold text-gray-800">${message}</p>
+                    <div class="flex justify-center space-x-4">
+                        <button id="confirm-btn" class="bg-red-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-red-600 transition-colors">Да</button>
+                        <button id="cancel-btn" class="bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded-lg hover:bg-gray-400 transition-colors">Отмена</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(dialog);
+            
+            document.getElementById('confirm-btn').onclick = onConfirm;
+            document.getElementById('cancel-btn').onclick = () => document.body.removeChild(dialog);
+        }
+
+        function handleStartTest() {
+            const userName = userNameInput.value.trim();
+            if (userName.length > 0) {
+                welcomeView.classList.add('hidden');
+                loadingView.classList.remove('hidden');
+                
+                imagesLoadedPromise.then(() => {
+                    loadingView.classList.add('hidden');
+                    startQuiz();
+                }).catch(error => {
+                    console.error("Error preloading images:", error);
+                    loadingView.classList.add('hidden');
+                    startQuiz();
+                });
+            } else {
+                userNameInput.classList.add('border-red-500');
+            }
+        }
+
+        // Event listeners
+        startTestBtn.addEventListener('click', handleStartTest);
+        userNameInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                handleStartTest();
+            }
+        });
+        addMyWordBtn.addEventListener('click', addMyWord);
+        showMistakesBtn.addEventListener('click', showMistakes);
+        showMyWordsBtn.addEventListener('click', showMyWords);
+        startNewTestBtn.addEventListener('click', () => startQuiz(defaultWords));
+        practiceMistakesBtn.addEventListener('click', startMistakesQuiz);
+        practiceMyWordsBtn.addEventListener('click', startMyWordsQuiz);
+        resetMistakesBtn.addEventListener('click', resetMistakes);
+        resetMyWordsBtn.addEventListener('click', resetMyWords);
+        goToAllWordsBtn.addEventListener('click', () => startQuiz(defaultWords));
+        
+        // Initial setup on window load
+        window.onload = function() {
+            updateMistakesCount();
+            updateMyWordsCount();
+            preloadImages();
+        };
+    </script>
+</body>
+</html>
