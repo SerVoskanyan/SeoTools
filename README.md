@@ -37,7 +37,4 @@ docker compose up --build -d
 - Приложение: http://localhost:8000
 - Swagger API Docs: http://localhost:8000/docs
 
----
-
-**Разработал:** SerVoskanyan  
-Проект создан в рамках автоматизации личного поиска и анализа рынка.
+**Разработал:** SerVoskanyan
