@@ -1,0 +1,9 @@
+venv
+.git
+__pycache__
+*.pyc
+.run
+.logs
+backend.log
+frontend.log
+*.md

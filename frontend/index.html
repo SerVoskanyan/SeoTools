@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SEO-Анализатор — Dashboard</title>
+    <meta name="description" content="Инструмент SEO-аудита с обходом CORS, PDF-отчётом и отправкой на email.">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: "Inter", system-ui, sans-serif; }
+
+        #analyze-button {
+            background-image: linear-gradient(135deg, #2563eb, #1d4ed8);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        #analyze-button:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 10px 25px rgba(37, 99, 235, 0.35);
+        }
+
+        .loading-spinner {
+            border-top-color: white;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Круговой SEO Score */
+        .score-ring {
+            transform: rotate(-90deg);
+            transform-origin: 50% 50%;
+        }
+        .score-ring-bg { stroke: #e5e7eb; }
+        .score-ring-fill {
+            transition: stroke-dashoffset 0.8s ease-out;
+            stroke-linecap: round;
+        }
+
+        .card-pass { border-left: 4px solid #22c55e; }
+        .card-warn { border-left: 4px solid #eab308; }
+        .card-crit { border-left: 4px solid #ef4444; }
+        .card-info { border-left: 4px solid #3b82f6; }
+
+        .heading-tree li { position: relative; }
+        .heading-tree .level-1 { margin-left: 0; }
+        .heading-tree .level-2 { margin-left: 1rem; border-left: 2px solid #dbeafe; padding-left: 0.75rem; }
+        .heading-tree .level-3 { margin-left: 2rem; border-left: 2px solid #bfdbfe; padding-left: 0.75rem; }
+        .heading-tree .level-4 { margin-left: 3rem; }
+        .heading-tree .level-5 { margin-left: 4rem; }
+        .heading-tree .level-6 { margin-left: 5rem; }
+
+        pre.code-block {
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-size: 0.75rem;
+            line-height: 1.4;
+        }
+
+        .pdf-card {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+            margin-bottom: 1.5rem;
+        }
+
+        .metric-card {
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 0.75rem;
+            padding: 1rem 1.25rem;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+        }
+
+        .status-tag-ok { background: #dcfce7; color: #166534; }
+        .status-tag-warn { background: #fef9c3; color: #854d0e; }
+        .status-tag-crit { background: #fee2e2; color: #991b1b; }
+
+        .state-ok {
+            margin-top: 0.75rem;
+            padding: 0.75rem 1rem;
+            font-size: 0.875rem;
+            line-height: 1.5;
+            color: #166534;
+            background: #ecfdf5;
+            border-radius: 0.5rem;
+            border: 1px solid #bbf7d0;
+        }
+        .state-ok-title { font-weight: 700; display: block; margin-bottom: 0.25rem; }
+
+        .state-fix {
+            margin-top: 0.75rem;
+            padding: 0.75rem 1rem;
+            font-size: 0.8125rem;
+            line-height: 1.55;
+            border-radius: 0.5rem;
+            border: 1px solid #fde68a;
+            background: #fffbeb;
+            color: #44403c;
+        }
+        .state-fix-error {
+            border-color: #fecaca;
+            background: #fef2f2;
+        }
+        .state-fix-row { margin-top: 0.5rem; }
+        .state-fix-row:first-child { margin-top: 0; }
+        .state-fix-row strong { color: #0f172a; }
+
+        .detail-url-list {
+            margin-top: 0.5rem;
+            margin-left: 1.25rem;
+            list-style: disc;
+            font-size: 0.75rem;
+            color: #57534e;
+            max-height: 10rem;
+            overflow-y: auto;
+        }
+        .detail-url-list li { margin-bottom: 0.25rem; word-break: break-all; }
+
+        .heading-badge-h1 { background: #dbeafe; color: #1e40af; }
+        .heading-badge-h2 { background: #e0e7ff; color: #3730a3; }
+        .heading-badge-h3 { background: #ede9fe; color: #5b21b6; }
+        .heading-badge-h4 { background: #fae8ff; color: #86198f; }
+        .heading-badge-h5 { background: #fce7f3; color: #9d174d; }
+        .heading-badge-h6 { background: #f1f5f9; color: #475569; }
+
+        /* PDF / печать */
+        @media print {
+            body { background: #fff !important; }
+            .no-print, .pdf-hidden { display: none !important; }
+            .pdf-card, .score-dashboard, .report-section {
+                break-inside: avoid !important;
+                page-break-inside: avoid !important;
+            }
+        }
+
+        .pdf-hidden { display: none !important; }
+
+        #email-modal:not(.hidden) { display: flex; }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen py-6 px-4">
+
+<div class="max-w-5xl mx-auto">
+    <!-- Шапка Dashboard -->
+    <header class="mb-8 text-center no-print">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-100 text-blue-800 text-xs font-semibold mb-3">
+            SEO Audit Tool
+        </div>
+        <h1 class="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">SEO-Анализатор</h1>
+        <p class="text-slate-600 mt-2 max-w-2xl mx-auto text-sm sm:text-base">
+            Технический SEO-аудит через Python-бэкенд (FastAPI). Отчёт, PDF и отправка на email.
+        </p>
+    </header>
+
+    <div id="control-panel" class="bg-white rounded-2xl shadow-xl border border-slate-200 p-6 sm:p-8 no-print">
+        <form id="url-form" class="flex flex-col sm:flex-row gap-3">
+            <input type="url" id="url-input" required
+                   placeholder="https://example.com"
+                   class="flex-grow px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+            <button type="submit" id="analyze-button"
+                    class="text-white font-semibold py-3 px-8 rounded-xl shadow-md disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2 min-w-[160px]">
+                Анализировать
+                <div id="loading-spinner" class="loading-spinner hidden border-2 border-white/30 border-t-white rounded-full w-5 h-5"></div>
+            </button>
+        </form>
+
+        <div id="action-bar" class="hidden mt-6 flex flex-col sm:flex-row flex-wrap gap-3 justify-center items-center border-t border-slate-100 pt-6">
+            <button type="button" id="download-pdf-button"
+                    class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 px-6 rounded-xl shadow transition-colors">
+                Скачать PDF
+            </button>
+            <button type="button" id="open-email-modal"
+                    class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 px-6 rounded-xl shadow transition-colors">
+                Отправить на Email
+            </button>
+        </div>
+    </div>
+
+    <main id="results-container" class="mt-8 space-y-6"></main>
+</div>
+
+<!-- Модальное окно EmailJS -->
+<div id="email-modal" class="hidden fixed inset-0 z-50 items-center justify-center p-4 bg-slate-900/60 no-print" aria-hidden="true">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 border border-slate-200" role="dialog" aria-labelledby="email-modal-title">
+        <h2 id="email-modal-title" class="text-xl font-bold text-slate-900 mb-1">Отправка отчёта</h2>
+        <p class="text-sm text-slate-600 mb-4">Укажите email получателя. Нужны настроенные ключи EmailJS (см. комментарий в коде).</p>
+        <form id="email-form" class="space-y-4">
+            <div>
+                <label for="recipient-email" class="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                <input type="email" id="recipient-email" required
+                       class="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none"
+                       placeholder="client@example.com">
+            </div>
+            <p id="email-status" class="text-sm hidden"></p>
+            <div class="flex gap-3 justify-end">
+                <button type="button" id="close-email-modal" class="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100">Отмена</button>
+                <button type="submit" id="send-email-button"
+                        class="px-5 py-2 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 disabled:opacity-50">
+                    Отправить
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
+<script>
+/**
+ * SEO Analyzer — фронтенд для FastAPI-бэкенда.
+ * EmailJS: замените константы на свои из https://www.emailjs.com/
+ */
+const EMAILJS_PUBLIC_KEY = 'YOUR_PUBLIC_KEY';
+const EMAILJS_SERVICE_ID = 'YOUR_SERVICE_ID';
+const EMAILJS_TEMPLATE_ID = 'YOUR_TEMPLATE_ID';
+
+const API_BASE_URL = '';
+
+/** Последний аудит (ответ API) — для PDF и email */
+let lastAudit = null;
+
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof emailjs !== 'undefined' && EMAILJS_PUBLIC_KEY !== 'YOUR_PUBLIC_KEY') {
+        emailjs.init(EMAILJS_PUBLIC_KEY);
+    }
+
+    const form = document.getElementById('url-form');
+    const urlInput = document.getElementById('url-input');
+    const analyzeButton = document.getElementById('analyze-button');
+    const spinner = document.getElementById('loading-spinner');
+    const resultsContainer = document.getElementById('results-container');
+    const actionBar = document.getElementById('action-bar');
+
+    form.addEventListener('submit', onAnalyze);
+    document.getElementById('download-pdf-button').addEventListener('click', downloadPdf);
+    setupEmailModal();
+
+    async function onAnalyze(event) {
+        event.preventDefault();
+        let url = urlInput.value.trim();
+        if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+
+        resultsContainer.innerHTML = '';
+        actionBar.classList.add('hidden');
+        lastAudit = null;
+        analyzeButton.disabled = true;
+        spinner.classList.remove('hidden');
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/analyze`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url })
+            });
+
+            if (!response.ok) {
+                let detail = `HTTP ${response.status}`;
+                try {
+                    const errJson = await response.json();
+                    detail = errJson.detail?.message || errJson.detail || detail;
+                    if (typeof detail === 'object') detail = detail.message || JSON.stringify(detail);
+                } catch { /* ignore */ }
+                resultsContainer.innerHTML = renderApiError(url, detail, response.status);
+                return;
+            }
+
+            const audit = await response.json();
+            lastAudit = audit;
+            resultsContainer.innerHTML = renderReport(audit);
+            actionBar.classList.remove('hidden');
+        } catch (err) {
+            console.error(err);
+            const hint = err.message === 'Failed to fetch'
+                ? `<p class="mt-2 text-sm">Проверьте, что бэкенд запущен: <code>${escapeHtml(API_BASE_URL)}</code></p>`
+                : '';
+            resultsContainer.innerHTML = card('crit', 'Ошибка анализа', `<p>${escapeHtml(err.message || 'Неизвестная ошибка')}</p>${hint}`);
+        } finally {
+            analyzeButton.disabled = false;
+            spinner.classList.add('hidden');
+        }
+    }
+
+    function recsByCategory(audit, category) {
+        const list = audit.recommendations || [];
+        return list.filter((r) => r.category === category);
+    }
+
+    function recToLevel(status) {
+        if (status === 'error') return 'crit';
+        if (status === 'warning') return 'warn';
+        return 'pass';
+    }
+
+    function statusTagLabel(level) {
+        if (level === 'crit') return { text: 'Критично', cls: 'status-tag-crit' };
+        if (level === 'warn') return { text: 'Внимание', cls: 'status-tag-warn' };
+        return { text: 'Отлично', cls: 'status-tag-ok' };
+    }
+
+    function detailUrlsHtml(rec) {
+        const urls = rec.detail_urls || [];
+        if (!urls.length) return '';
+        const more = urls.length >= 100 ? '<li class="text-slate-400">… и другие (список обрезан)</li>' : '';
+        return `<ul class="detail-url-list">${urls.map((u) => `<li>${escapeHtml(u)}</li>`).join('')}${more}</ul>`;
+    }
+
+    function conceptBlockHtml(rec, level) {
+        if (rec.status === 'ok') {
+            const praise = rec.praise || rec.recommendation || 'Параметр соответствует рекомендациям.';
+            return `<div class="state-ok"><span class="state-ok-title">🎉 Все отлично!</span>${escapeHtml(praise)}</div>`;
+        }
+        const current = rec.value || '—';
+        const expected = rec.expected || 'Соответствие SEO-стандартам для этой проверки.';
+        const solution = rec.recommendation || '—';
+        const errCls = level === 'crit' ? ' state-fix-error' : '';
+        let countLine = '';
+        if (rec.char_count != null && (rec.id === 'title' || rec.id === 'description')) {
+            countLine = `<div class="text-xs text-slate-500 mt-1">Символов: ${rec.char_count}</div>`;
+        }
+        return `
+            <div class="state-fix${errCls}">
+                <div class="state-fix-row">❌ <strong>Как сейчас:</strong> ${escapeHtml(current)}</div>
+                ${countLine}
+                ${detailUrlsHtml(rec)}
+                <div class="state-fix-row">✅ <strong>Как должно быть:</strong> ${escapeHtml(expected)}</div>
+                <div class="state-fix-row">💡 <strong>Решение:</strong> ${escapeHtml(solution)}</div>
+            </div>`;
+    }
+
+    function metricCard(rec) {
+        const level = recToLevel(rec.status);
+        const tag = statusTagLabel(level);
+        return `
+            <div class="pdf-card metric-card">
+                <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
+                    <h3 class="font-semibold text-slate-900 text-sm sm:text-base">${escapeHtml(rec.title)}</h3>
+                    <span class="text-xs font-semibold px-2.5 py-1 rounded-full ${tag.cls}">${tag.text}</span>
+                </div>
+                ${conceptBlockHtml(rec, level)}
+            </div>`;
+    }
+
+    function renderRecSection(title, recs, extraHtml = '') {
+        if (!recs.length && !extraHtml) return '';
+        const cards = recs.map(metricCard).join('');
+        return `
+            <section class="report-section bg-white rounded-2xl shadow-lg border border-slate-200 p-6 sm:p-8">
+                <h2 class="text-lg font-bold text-slate-900 mb-4">${escapeHtml(title)}</h2>
+                <div class="space-y-0">${cards}</div>
+                ${extraHtml}
+            </section>`;
+    }
+
+    function renderTechFile(label, file, rec) {
+        const level = file.available ? 'pass' : 'crit';
+        const tag = statusTagLabel(level);
+        const statusRec = rec || {
+            status: file.available ? 'ok' : 'error',
+            title: label,
+            value: file.available
+                ? `HTTP ${file.status_code} · ${file.size_bytes} байт · ${file.url}`
+                : `Недоступен${file.status_code ? ` (HTTP ${file.status_code})` : ''} · ${file.url}`,
+            expected: file.available
+                ? 'Файл отдаётся с HTTP 200 из корня домена.'
+                : `Файл ${label} доступен по прямому URL в корне сайта.`,
+            recommendation: file.available
+                ? 'Поддерживайте актуальность файла при изменении структуры сайта.'
+                : 'Разместите файл в корне сайта и проверьте права, редиректы и CDN.',
+            praise: file.available ? 'Файл доступен поисковым роботам — отлично.' : ''
+        };
+        const preview = file.available ? escapeHtml(file.preview || '') : '';
+        return `
+            <div class="pdf-card metric-card">
+                <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
+                    <h3 class="font-semibold text-slate-900">${escapeHtml(label)}</h3>
+                    <span class="text-xs font-semibold px-2.5 py-1 rounded-full ${tag.cls}">${tag.text}</span>
+                </div>
+                ${file.error ? `<p class="text-xs mb-1 text-red-600">${escapeHtml(file.error)}</p>` : ''}
+                ${preview ? `<pre class="code-block mt-2 p-3 bg-slate-900 text-emerald-100 rounded-lg overflow-x-auto max-h-48"><code>${preview}</code></pre>` : ''}
+                ${conceptBlockHtml(statusRec, level)}
+            </div>`;
+    }
+
+    function renderApiError(url, detail, status) {
+        return card('crit', 'Не удалось загрузить страницу', `
+            <p>Сайт <strong>${escapeHtml(url)}</strong> не удалось проанализировать (бэкенд вернул ${status}).</p>
+            <p class="mt-2 text-sm">${escapeHtml(String(detail))}</p>
+            <p class="mt-3 text-sm">Возможные причины: защита от ботов (Cloudflare/Qrator), блокировка IP дата-центра, неверный URL.</p>`);
+    }
+
+    function safeUrl(u) {
+        try { return new URL(u); } catch { return null; }
+    }
+
+    function scoreColor(score) {
+        const label = score >= 80 ? 'Отлично' : score >= 50 ? 'Требует внимания' : 'Критично';
+        if (score >= 80) return { stroke: '#22c55e', label, badge: 'bg-emerald-100 text-emerald-800' };
+        if (score >= 50) return { stroke: '#eab308', label, badge: 'bg-amber-100 text-amber-800' };
+        return { stroke: '#ef4444', label, badge: 'bg-red-100 text-red-800' };
+    }
+
+    function renderScoreRing(score, labelOverride) {
+        const r = 54;
+        const c = 2 * Math.PI * r;
+        const offset = c - (score / 100) * c;
+        const colors = scoreColor(score);
+        const badgeLabel = labelOverride || colors.label;
+        return `
+            <div class="score-dashboard flex flex-col sm:flex-row items-center gap-6 p-6 bg-slate-50 rounded-2xl border border-slate-200">
+                <div class="relative w-36 h-36 flex-shrink-0">
+                    <svg class="w-full h-full score-ring" viewBox="0 0 120 120" aria-hidden="true">
+                        <circle class="score-ring-bg" cx="60" cy="60" r="${r}" fill="none" stroke-width="10"/>
+                        <circle class="score-ring-fill" cx="60" cy="60" r="${r}" fill="none" stroke-width="10"
+                                stroke="${colors.stroke}" stroke-dasharray="${c}" stroke-dashoffset="${offset}"/>
+                    </svg>
+                    <div class="absolute inset-0 flex flex-col items-center justify-center">
+                        <span class="text-3xl font-extrabold text-slate-900">${score}</span>
+                        <span class="text-xs text-slate-500">из 100</span>
+                    </div>
+                </div>
+                <div class="text-center sm:text-left">
+                    <span class="inline-block px-3 py-1 rounded-full text-sm font-semibold ${colors.badge}">${escapeHtml(badgeLabel)}</span>
+                    <p class="text-slate-600 mt-2 text-sm">Сводная оценка по ключевым SEO-проверкам на странице.</p>
+                </div>
+            </div>`;
+    }
+
+    function card(level, title, bodyHtml, recommendation) {
+        const rec = {
+            status: level === 'crit' ? 'error' : level === 'warn' ? 'warning' : 'ok',
+            title,
+            value: bodyHtml.replace(/<[^>]+>/g, ' ').trim().slice(0, 500),
+            expected: 'Устраните проблему согласно рекомендациям SEO-аудита.',
+            recommendation: recommendation || '',
+            praise: level === 'pass' ? 'Проверка пройдена.' : ''
+        };
+        return metricCard(rec);
+    }
+
+    function headingIndentClass(level) {
+        const map = { 1: 'pl-0', 2: 'pl-2', 3: 'pl-4', 4: 'pl-6', 5: 'pl-8', 6: 'pl-10' };
+        return map[level] || 'pl-0';
+    }
+
+    function headingBadgeClass(tag) {
+        return `heading-badge-${tag} text-xs font-bold px-2 py-0.5 rounded`;
+    }
+
+    function renderReport(audit) {
+        const ha = audit.headings;
+        const tech = audit.tech || {};
+
+        const treeHtml = ha.items.length
+            ? `<ul class="heading-tree space-y-2 text-sm mt-4 border-l border-slate-200 ml-1">${ha.items.map((it) => {
+                const tag = it.tag.toUpperCase();
+                const badgeCls = headingBadgeClass(it.tag);
+                return `<li class="${headingIndentClass(it.level)} flex items-start gap-2 py-0.5">
+                    <span class="${badgeCls} shrink-0">${tag}</span>
+                    <span class="text-slate-800">${escapeHtml(it.text)}</span>
+                </li>`;
+            }).join('')}</ul>`
+            : '<p class="text-sm text-slate-500 mt-2">Заголовки не найдены.</p>';
+
+        const metaRecs = recsByCategory(audit, 'meta');
+        const headingRecs = recsByCategory(audit, 'headings');
+        const imageRecs = recsByCategory(audit, 'images');
+        const linkRecs = recsByCategory(audit, 'links');
+        const securityRecs = recsByCategory(audit, 'security');
+        const serverRecs = recsByCategory(audit, 'server');
+        const robotsRec = recsByCategory(audit, 'robots');
+        const sitemapRec = recsByCategory(audit, 'sitemap');
+
+        const score = audit.seo_score;
+        const fetchInfo = audit.fetch
+            ? `HTTP ${audit.fetch.status_code} · попыток: ${audit.fetch.attempts}`
+            : '—';
+
+        const techLine = [
+            tech.cms_or_engine ? `Движок: ${tech.cms_or_engine}` : null,
+            tech.html_lang ? `Язык: ${tech.html_lang}` : null,
+            tech.server_header ? `Server: ${tech.server_header}` : null
+        ].filter(Boolean).join(' · ');
+
+        return `
+            <div id="pdf-export-root" class="space-y-6">
+                <section class="report-section pdf-card bg-white rounded-2xl shadow-lg border border-slate-200 p-6 sm:p-8">
+                    <h2 class="text-lg font-bold text-slate-900 mb-4">Сводка</h2>
+                    <p class="text-sm text-slate-600 mb-2">
+                        URL: <a class="text-blue-600 break-all" href="${escapeHtml(audit.page_url)}" target="_blank" rel="noopener">${escapeHtml(audit.page_url)}</a>
+                    </p>
+                    <p class="text-sm text-slate-600 mb-4">
+                        Дата: ${escapeHtml(audit.analyzed_at)} · Загрузка: ${escapeHtml(fetchInfo)}
+                        ${techLine ? `<br><span class="text-slate-500">${escapeHtml(techLine)}</span>` : ''}
+                    </p>
+                    ${renderScoreRing(score, audit.score_label)}
+                </section>
+
+                ${renderRecSection('Мета-теги и Open Graph', metaRecs)}
+
+                ${renderRecSection('Структура заголовков (H1–H6)', headingRecs, `
+                    <div class="mt-6 pt-4 border-t border-slate-100">
+                        <h3 class="font-semibold text-slate-800 text-sm mb-2">Дерево заголовков</h3>
+                        ${treeHtml}
+                    </div>`)}
+
+                ${renderRecSection('Изображения и ссылки', [...imageRecs, ...linkRecs])}
+
+                ${renderRecSection('Безопасность, сервер и мобильность', [...securityRecs, ...serverRecs])}
+
+                <section class="report-section bg-white rounded-2xl shadow-lg border border-slate-200 p-6 sm:p-8">
+                    <h2 class="text-lg font-bold text-slate-900 mb-4">robots.txt и sitemap.xml</h2>
+                    <p class="text-xs text-slate-500 mb-4">Параллельная проверка на бэкенде.</p>
+                    ${renderTechFile('robots.txt', audit.robots_txt, robotsRec[0])}
+                    ${renderTechFile('sitemap.xml', audit.sitemap_xml, sitemapRec[0])}
+                </section>
+            </div>`;
+    }
+
+    function downloadPdf() {
+        const element = document.getElementById('pdf-export-root') || document.getElementById('results-container');
+        if (!element || !lastAudit) return;
+
+        const hiddenEls = document.querySelectorAll('.no-print, header.no-print');
+        hiddenEls.forEach((el) => el.classList.add('pdf-hidden'));
+
+        const opt = {
+            margin: 10,
+            filename: 'SEO-Audit.pdf',
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2, useCORS: true, logging: false },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+            pagebreak: { mode: ['avoid-all', 'css'] }
+        };
+
+        html2pdf().set(opt).from(element).save().finally(() => {
+            hiddenEls.forEach((el) => el.classList.remove('pdf-hidden'));
+        });
+    }
+
+    function collectIssues(audit) {
+        const recs = audit.recommendations || [];
+        return recs.filter((r) => r.status === 'error' || r.status === 'warning');
+    }
+
+    function buildEmailSummaryText(audit) {
+        const label = audit.score_label || scoreColor(audit.seo_score).label;
+        const issues = collectIssues(audit);
+        const lines = [
+            `SEO-аудит: ${audit.page_url}`,
+            `SEO Score: ${audit.seo_score}/100 (${label})`,
+            `Дата: ${audit.analyzed_at}`,
+            '',
+            issues.length ? 'Основные замечания:' : 'Критичных замечаний не найдено.',
+            ...issues.slice(0, 12).map((r) => `- [${r.status === 'error' ? '!' : '~'}] ${r.title}: ${r.value}`)
+        ];
+        return lines.join('\n');
+    }
+
+    function buildEmailHtml(audit) {
+        const score = audit.seo_score;
+        const colors = scoreColor(score);
+        const label = audit.score_label || colors.label;
+        const statusColor = score >= 80 ? '#22c55e' : score >= 50 ? '#eab308' : '#ef4444';
+        const issues = collectIssues(audit);
+        const issueRows = issues.slice(0, 10).map((r) => {
+            const icon = r.status === 'error' ? '🔴' : '🟡';
+            return `<li style="margin-bottom:8px;">${icon} <strong>${escapeHtml(r.title)}</strong> — ${escapeHtml(r.value)}</li>`;
+        }).join('');
+
+        return `
+<div style="font-family:Arial,sans-serif;max-width:560px;">
+  <h1 style="margin:0 0 8px;font-size:20px;color:#0f172a;">SEO Audit — краткое резюме</h1>
+  <p style="color:#64748b;font-size:14px;margin:0 0 12px;">${escapeHtml(audit.page_url)}</p>
+  <p style="font-size:28px;font-weight:bold;color:${statusColor};margin:0 0 4px;">${score}/100</p>
+  <p style="color:#475569;font-size:14px;margin:0 0 16px;">${escapeHtml(label)} · ${escapeHtml(audit.analyzed_at)}</p>
+  ${issues.length ? `<ul style="padding-left:18px;font-size:14px;color:#334155;">${issueRows}</ul>` : '<p style="font-size:14px;color:#22c55e;">Серьёзных проблем не обнаружено.</p>'}
+</div>`;
+    }
+
+    function isValidEmail(email) {
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    }
+
+    function setupEmailModal() {
+        const modal = document.getElementById('email-modal');
+        const openBtn = document.getElementById('open-email-modal');
+        const closeBtn = document.getElementById('close-email-modal');
+        const emailForm = document.getElementById('email-form');
+        const statusEl = document.getElementById('email-status');
+        const sendBtn = document.getElementById('send-email-button');
+
+        openBtn.addEventListener('click', () => {
+            if (!lastAudit) return;
+            modal.classList.remove('hidden');
+            modal.setAttribute('aria-hidden', 'false');
+        });
+
+        const close = () => {
+            modal.classList.add('hidden');
+            modal.setAttribute('aria-hidden', 'true');
+            statusEl.classList.add('hidden');
+        };
+        closeBtn.addEventListener('click', close);
+        modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+
+        emailForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!lastAudit) return;
+
+            const toEmail = document.getElementById('recipient-email').value.trim();
+            statusEl.classList.remove('hidden');
+
+            if (!toEmail) {
+                statusEl.className = 'text-sm text-red-600';
+                statusEl.textContent = 'Укажите email получателя.';
+                return;
+            }
+            if (!isValidEmail(toEmail)) {
+                statusEl.className = 'text-sm text-red-600';
+                statusEl.textContent = 'Некорректный формат email.';
+                return;
+            }
+
+            if (EMAILJS_PUBLIC_KEY === 'YOUR_PUBLIC_KEY' || typeof emailjs === 'undefined') {
+                statusEl.textContent = 'Настройте EMAILJS_PUBLIC_KEY, SERVICE_ID и TEMPLATE_ID в index.html';
+                statusEl.className = 'text-sm text-red-600';
+                return;
+            }
+
+            sendBtn.disabled = true;
+            statusEl.className = 'text-sm text-slate-600';
+            statusEl.textContent = 'Отправка…';
+
+            const summaryText = buildEmailSummaryText(lastAudit);
+            const summaryHtml = buildEmailHtml(lastAudit);
+            const issueCount = collectIssues(lastAudit).length;
+            const templateParams = {
+                to_email: toEmail,
+                user_email: toEmail,
+                reply_to: toEmail,
+                site_url: lastAudit.page_url,
+                seo_score: String(lastAudit.seo_score),
+                score_label: lastAudit.score_label || scoreColor(lastAudit.seo_score).label,
+                issues_count: String(issueCount),
+                report_summary: summaryText,
+                report_summary_html: summaryHtml,
+                message: summaryText
+            };
+
+            try {
+                await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, templateParams);
+                statusEl.className = 'text-sm text-emerald-600';
+                statusEl.textContent = 'Краткое резюме отправлено на ' + toEmail;
+                setTimeout(close, 1800);
+            } catch (err) {
+                console.error(err);
+                statusEl.className = 'text-sm text-red-600';
+                statusEl.textContent = 'Ошибка EmailJS. В шаблоне должны быть поля: to_email, message или report_summary_html.';
+            } finally {
+                sendBtn.disabled = false;
+            }
+        });
+    }
+
+    function escapeHtml(str) {
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+});
+</script>
+</body>
+</html>
