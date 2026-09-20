@@ -2,6 +2,8 @@
 
 Автоматизированный инструмент для технического SEO-анализа и аудита сайтов. Построен на базе FastAPI (Serverless Backend) и чистого JS/Tailwind (Frontend).
 
+🔗 **Live Demo (Production):** https://seo-tools-servoskanyan.vercel.app
+
 ## 🚀 Возможности
 
 - Полный технический SEO-анализ страниц (мета-теги, заголовки, изображения, ссылки).
