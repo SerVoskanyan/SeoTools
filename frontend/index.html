@@ -146,6 +146,12 @@
         }
         .detail-url-list li { margin-bottom: 0.25rem; word-break: break-all; }
 
+        .tech-file-content {
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: none;
+        }
+
         .heading-badge-h1 { background: #dbeafe; color: #1e40af; }
         .heading-badge-h2 { background: #e0e7ff; color: #3730a3; }
         .heading-badge-h3 { background: #ede9fe; color: #5b21b6; }
@@ -425,7 +431,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 : 'Разместите файл в корне сайта и проверьте права, редиректы и CDN.',
             praise: file.available ? 'Файл доступен поисковым роботам — отлично.' : ''
         };
-        const preview = file.available ? escapeHtml(file.preview || '') : '';
+        const bodyText = techFileDisplayText(file);
         return `
             <div class="pdf-card metric-card">
                 <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
@@ -436,9 +442,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 </div>
                 ${file.error ? `<p class="text-xs mb-1 text-red-600">${escapeHtml(file.error)}</p>` : ''}
-                ${preview ? `<pre class="code-block mt-2 p-3 bg-slate-900 text-emerald-100 rounded-lg overflow-x-auto max-h-48"><code>${preview}</code></pre>` : ''}
+                ${bodyText ? `<pre class="code-block tech-file-content mt-2 p-3 bg-slate-900 text-emerald-100 rounded-lg overflow-x-auto"><code>${escapeHtml(bodyText)}</code></pre>` : ''}
                 ${conceptBlockHtml(statusRec, level)}
             </div>`;
+    }
+
+    function techFileDisplayText(file) {
+        if (!file || !file.available) return '';
+        return file.content || file.preview || '';
     }
 
     function renderApiError(url, detail, status) {
@@ -609,157 +620,25 @@ document.addEventListener('DOMContentLoaded', () => {
         downloadBlob(filename, file.content, mime);
     }
 
-    function reportStatusLabel(status) {
-        if (status === 'error') return 'Критично';
-        if (status === 'warning') return 'Внимание';
-        if (status === 'ok') return 'Отлично';
-        return status || '—';
-    }
-
-    function buildFullReportHtml(audit) {
-        const recs = audit.recommendations || [];
-        const blocks = recs.map((rec) => {
-            const urls = (rec.detail_urls || [])
-                .map((url) => `<li>${escapeHtml(url)}</li>`)
-                .join('');
-            const chars = rec.char_count != null
-                ? `<p class="meta">Символов: ${rec.char_count}</p>`
-                : '';
-            return `
-            <section class="block">
-                <h2>${escapeHtml(rec.title)} <span class="status status-${escapeHtml(rec.status || 'ok')}">${escapeHtml(reportStatusLabel(rec.status))}</span></h2>
-                <p class="meta">${escapeHtml(rec.category || '')}${rec.id ? ` · ${escapeHtml(rec.id)}` : ''}</p>
-                <p><strong>Как сейчас:</strong> ${escapeHtml(rec.value || '—')}</p>
-                ${chars}
-                ${urls ? `<ul>${urls}</ul>` : ''}
-                ${rec.expected ? `<p><strong>Как должно быть:</strong> ${escapeHtml(rec.expected)}</p>` : ''}
-                ${rec.recommendation ? `<p><strong>Решение:</strong> ${escapeHtml(rec.recommendation)}</p>` : ''}
-                ${rec.praise ? `<p><strong>Комментарий:</strong> ${escapeHtml(rec.praise)}</p>` : ''}
-            </section>`;
-        }).join('');
-
-        const headingItems = (audit.headings && audit.headings.items) || [];
-        const headingList = headingItems.length
-            ? `<ul>${headingItems.map((item) => `<li><strong>${escapeHtml(String(item.tag || '').toUpperCase())}</strong> ${escapeHtml(item.text || '')}</li>`).join('')}</ul>`
-            : '<p>Заголовки не найдены.</p>';
-
-        const meta = audit.meta || {};
-        const tech = audit.tech || {};
-        const images = audit.images || {};
-        const links = audit.links || {};
-        const security = audit.security || {};
-        const robots = audit.robots_txt || {};
-        const sitemap = audit.sitemap_xml || {};
-        const missingAlt = (images.missing_alt_urls || []).map((url) => `<li>${escapeHtml(url)}</li>`).join('');
-        const unsafe = (links.unsafe_blank_urls || []).map((url) => `<li>${escapeHtml(url)}</li>`).join('');
-        const fetchInfo = audit.fetch
-            ? `HTTP ${audit.fetch.status_code} · попыток: ${audit.fetch.attempts}`
-            : '—';
-
-        return `
-<style>
-.pdf-source { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #0f172a; background: #fff; padding: 8px 12px 24px; line-height: 1.5; width: 720px; }
-.pdf-source h1 { font-size: 26px; margin: 0 0 4px; }
-.pdf-source h2 { font-size: 18px; margin: 18px 0 8px; }
-.pdf-source .lead, .pdf-source .meta { color: #475569; }
-.pdf-source .meta { font-size: 13px; }
-.pdf-source .block { border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 16px; margin: 10px 0; }
-.pdf-source .status { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
-.pdf-source .status-ok { background: #dcfce7; color: #166534; }
-.pdf-source .status-warning { background: #fef9c3; color: #854d0e; }
-.pdf-source .status-error { background: #fee2e2; color: #991b1b; }
-.pdf-source ul { margin: 8px 0 0; padding-left: 18px; }
-.pdf-source li { margin: 2px 0; word-break: break-word; }
-.pdf-source pre { white-space: pre-wrap; word-break: break-word; background: #0f172a; color: #d1fae5; padding: 12px; border-radius: 8px; margin: 8px 0 0; overflow: visible; max-height: none; }
-</style>
-<div class="pdf-source">
-<h1>SEO-отчёт</h1>
-<p class="lead">${escapeHtml(audit.page_url || '')}</p>
-<p>Оценка: <strong>${audit.seo_score}/100</strong> · ${escapeHtml(audit.score_label || '')}<br>
-Дата: ${escapeHtml(audit.analyzed_at || '')}<br>
-Загрузка: ${escapeHtml(fetchInfo)}</p>
-<h2>Мета</h2>
-<ul>
-<li>Title: ${escapeHtml(meta.title || '—')} (${meta.title_char_count ?? 0} симв.)</li>
-<li>Description: ${escapeHtml(meta.description || '—')} (${meta.description_char_count ?? 0} симв.)</li>
-<li>Canonical: ${escapeHtml(meta.canonical || '—')}</li>
-<li>Robots: ${escapeHtml(meta.robots || '—')}</li>
-<li>Viewport: ${escapeHtml(security.viewport_content || '—')}</li>
-<li>Язык: ${escapeHtml(tech.html_lang || '—')}</li>
-<li>HTTPS: ${security.is_https ? 'да' : 'нет'}</li>
-<li>Движок: ${escapeHtml(tech.cms_or_engine || '—')}</li>
-</ul>
-<h2>Проверки (${recs.length})</h2>
-${blocks || '<p>Нет данных.</p>'}
-<h2>Заголовки (${headingItems.length})</h2>
-${headingList}
-<h2>Изображения и ссылки</h2>
-<p>Изображений: ${images.total ?? 0}, без alt: ${images.missing_alt_count ?? 0}. Ссылок: ${links.total ?? 0} (внутр. ${links.internal ?? 0}, внешн. ${links.external ?? 0}).</p>
-${missingAlt ? `<p><strong>Без alt</strong></p><ul>${missingAlt}</ul>` : ''}
-${unsafe ? `<p><strong>target=_blank без rel</strong></p><ul>${unsafe}</ul>` : ''}
-${techFileSection('robots.txt', robots)}
-${techFileSection('sitemap.xml', sitemap)}
-</div>`;
-    }
-
-    function techFileSection(label, file) {
-        const raw = (file && (file.content || file.preview)) || '';
-        return `
-<h2>${escapeHtml(label)}</h2>
-<p>${file && file.available ? 'Доступен' : 'Недоступен'} · HTTP ${file && file.status_code != null ? file.status_code : '—'} · ${file && file.size_bytes != null ? file.size_bytes : 0} байт<br>${escapeHtml((file && file.url) || '')}</p>
-${file && file.error ? `<p>${escapeHtml(file.error)}</p>` : ''}
-${raw ? `<pre>${escapeHtml(raw)}</pre>` : '<p>Содержимое не получено.</p>'}`;
-    }
-
     function downloadPdf() {
-        if (!lastAudit) return;
-        const button = document.getElementById('download-pdf-button');
-        const filename = reportFilename(lastAudit, 'pdf');
-        const markup = buildFullReportHtml(lastAudit);
+        const element = document.getElementById('pdf-export-root') || document.getElementById('results-container');
+        if (!element || !lastAudit || typeof html2pdf === 'undefined') return;
 
-        if (typeof html2pdf === 'undefined') {
-            downloadBlob(reportFilename(lastAudit, 'html'), wrapReportDocument(markup), 'text/html;charset=utf-8');
-            return;
-        }
-
-        const host = document.createElement('div');
-        host.setAttribute('aria-hidden', 'true');
-        host.style.cssText = 'position:absolute;left:0;top:0;width:780px;background:#ffffff;';
-        host.innerHTML = markup;
-        document.body.appendChild(host);
-        if (button) button.disabled = true;
+        const hiddenEls = document.querySelectorAll('.no-print, header.no-print');
+        hiddenEls.forEach((el) => el.classList.add('pdf-hidden'));
 
         const opt = {
             margin: 10,
-            filename: filename,
-            image: { type: 'jpeg', quality: 0.95 },
-            html2canvas: { scale: 1, useCORS: true, logging: false, backgroundColor: '#ffffff' },
+            filename: reportFilename(lastAudit, 'pdf'),
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2, useCORS: true, logging: false },
             jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-            pagebreak: { mode: ['legacy'] }
+            pagebreak: { mode: ['avoid-all', 'css'] }
         };
 
-        let settled = false;
-        const finish = () => {
-            if (settled) return;
-            settled = true;
-            host.remove();
-            if (button) button.disabled = false;
-        };
-
-        try {
-            const task = html2pdf().set(opt).from(host).save();
-            Promise.resolve(task).then(finish).catch(() => {
-                downloadBlob(reportFilename(lastAudit, 'html'), wrapReportDocument(markup), 'text/html;charset=utf-8');
-                finish();
-            });
-        } catch (err) {
-            downloadBlob(reportFilename(lastAudit, 'html'), wrapReportDocument(markup), 'text/html;charset=utf-8');
-            finish();
-        }
-    }
-
-    function wrapReportDocument(markup) {
-        return `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>SEO-отчёт</title></head><body>${markup}</body></html>`;
+        html2pdf().set(opt).from(element).save().finally(() => {
+            hiddenEls.forEach((el) => el.classList.remove('pdf-hidden'));
+        });
     }
 
     function collectIssues(audit) {
