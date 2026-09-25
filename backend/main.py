@@ -1680,6 +1680,19 @@ def praise_for_check(check_id: str) -> str:
     return praises.get(check_id, "Параметр соответствует лучшим практикам SEO.")
 
 
+def _clip_text(text: str, limit: int) -> str:
+    compact = " ".join(text.split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 1] + "…"
+
+
+def _og_current(name: str, value: str | None) -> str:
+    if not value:
+        return f"{name}=—"
+    return f"{name}={_clip_text(value, 90)}"
+
+
 def current_for_check(
     c: CheckItem,
     meta: MetaBlock,
@@ -1719,17 +1732,31 @@ def current_for_check(
     if c.id == "robots":
         return meta.robots or "(meta robots не задан)", None, detail_urls
     if c.id == "og":
-        parts = [
-            f"og:title={'✓' if meta.og_title else '—'}",
-            f"og:description={'✓' if meta.og_description else '—'}",
-            f"og:image={'✓' if meta.og_image else '—'}",
-        ]
-        return "; ".join(parts), None, detail_urls
+        return "; ".join(
+            [
+                _og_current("og:title", meta.og_title),
+                _og_current("og:description", meta.og_description),
+                _og_current("og:image", meta.og_image),
+            ]
+        ), None, detail_urls
     if c.id == "h1":
-        return f"H1 на странице: {headings.h1_count} (всего заголовков: {headings.total})", None, detail_urls
+        summary = f"H1 на странице: {headings.h1_count} (всего заголовков: {headings.total})"
+        h1_texts = [item.text for item in headings.items if item.level == 1 and item.text]
+        if not h1_texts:
+            return summary, None, detail_urls
+        shown = "; ".join(f"«{_clip_text(text, 100)}»" for text in h1_texts[:3])
+        extra = f" и ещё {len(h1_texts) - 3}" if len(h1_texts) > 3 else ""
+        return f"{summary}. Текст: {shown}{extra}", None, detail_urls
     if c.id == "headings":
         if headings.warnings:
             return "; ".join(headings.warnings[:3]), None, detail_urls
+        outline = " → ".join(
+            f"{item.tag.upper()} {_clip_text(item.text, 48)}"
+            for item in headings.items[:6]
+            if item.text
+        )
+        if outline:
+            return f"Иерархия без пропусков: {outline}", None, detail_urls
         return "Пропусков уровней не обнаружено", None, detail_urls
     if c.id == "img-alt":
         detail_urls = list(images.missing_alt_urls)
@@ -1752,7 +1779,11 @@ def current_for_check(
             detail_urls,
         )
     if c.id == "ssl":
-        return "HTTPS" if security.is_https else "Страница загружена по HTTP", None, detail_urls
+        return (
+            "Страница открыта по HTTPS"
+            if security.is_https
+            else "Страница загружена по HTTP"
+        ), None, detail_urls
     if c.id == "viewport":
         return security.viewport_content or "Meta viewport отсутствует", None, detail_urls
     if c.id == "favicon":

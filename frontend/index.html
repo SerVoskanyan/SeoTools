@@ -89,6 +89,33 @@
             border: 1px solid #bbf7d0;
         }
         .state-ok-title { font-weight: 700; display: block; margin-bottom: 0.25rem; }
+        .state-ok-praise { display: block; }
+        .state-metric {
+            margin-top: 0.75rem;
+            padding: 0.65rem 0.75rem;
+            border-radius: 0.45rem;
+            background: rgba(255, 255, 255, 0.78);
+            border: 1px solid #86efac;
+        }
+        .state-metric-label {
+            font-size: 0.7rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: #166534;
+        }
+        .state-metric-value {
+            margin-top: 0.25rem;
+            color: #0f172a;
+            font-size: 0.8125rem;
+            line-height: 1.45;
+            word-break: break-word;
+        }
+        .state-metric-count {
+            margin-top: 0.35rem;
+            font-size: 0.75rem;
+            color: #475569;
+        }
 
         .state-fix {
             margin-top: 0.75rem;
@@ -307,23 +334,40 @@ document.addEventListener('DOMContentLoaded', () => {
         return `<ul class="detail-url-list">${urls.map((u) => `<li>${escapeHtml(u)}</li>`).join('')}${more}</ul>`;
     }
 
+    function charCountHtml(rec) {
+        if (rec.char_count == null || (rec.id !== 'title' && rec.id !== 'description')) return '';
+        return `<div class="state-metric-count">Символов: ${rec.char_count}</div>`;
+    }
+
+    function currentValueHtml(rec) {
+        const current = rec.value || '—';
+        return `
+            <div class="state-metric">
+                <div class="state-metric-label">Как сейчас</div>
+                <div class="state-metric-value">${escapeHtml(current)}</div>
+                ${charCountHtml(rec)}
+                ${detailUrlsHtml(rec)}
+            </div>`;
+    }
+
     function conceptBlockHtml(rec, level) {
         if (rec.status === 'ok') {
             const praise = rec.praise || rec.recommendation || 'Параметр соответствует рекомендациям.';
-            return `<div class="state-ok"><span class="state-ok-title">🎉 Все отлично!</span>${escapeHtml(praise)}</div>`;
+            return `
+                <div class="state-ok">
+                    <span class="state-ok-title">🎉 Все отлично!</span>
+                    <span class="state-ok-praise">${escapeHtml(praise)}</span>
+                    ${currentValueHtml(rec)}
+                </div>`;
         }
         const current = rec.value || '—';
         const expected = rec.expected || 'Соответствие SEO-стандартам для этой проверки.';
         const solution = rec.recommendation || '—';
         const errCls = level === 'crit' ? ' state-fix-error' : '';
-        let countLine = '';
-        if (rec.char_count != null && (rec.id === 'title' || rec.id === 'description')) {
-            countLine = `<div class="text-xs text-slate-500 mt-1">Символов: ${rec.char_count}</div>`;
-        }
         return `
             <div class="state-fix${errCls}">
                 <div class="state-fix-row">❌ <strong>Как сейчас:</strong> ${escapeHtml(current)}</div>
-                ${countLine}
+                ${charCountHtml(rec)}
                 ${detailUrlsHtml(rec)}
                 <div class="state-fix-row">✅ <strong>Как должно быть:</strong> ${escapeHtml(expected)}</div>
                 <div class="state-fix-row">💡 <strong>Решение:</strong> ${escapeHtml(solution)}</div>
