@@ -663,7 +663,7 @@ document.addEventListener('DOMContentLoaded', () => {
 .pdf-source h2 { font-size: 18px; margin: 18px 0 8px; }
 .pdf-source .lead, .pdf-source .meta { color: #475569; }
 .pdf-source .meta { font-size: 13px; }
-.pdf-source .block { border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 16px; margin: 10px 0; page-break-inside: avoid; }
+.pdf-source .block { border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 16px; margin: 10px 0; }
 .pdf-source .status { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
 .pdf-source .status-ok { background: #dcfce7; color: #166534; }
 .pdf-source .status-warning { background: #fef9c3; color: #854d0e; }
@@ -712,28 +712,54 @@ ${raw ? `<pre>${escapeHtml(raw)}</pre>` : '<p>Содержимое не полу
     }
 
     function downloadPdf() {
-        if (!lastAudit || typeof html2pdf === 'undefined') return;
+        if (!lastAudit) return;
         const button = document.getElementById('download-pdf-button');
+        const filename = reportFilename(lastAudit, 'pdf');
+        const markup = buildFullReportHtml(lastAudit);
+
+        if (typeof html2pdf === 'undefined') {
+            downloadBlob(reportFilename(lastAudit, 'html'), wrapReportDocument(markup), 'text/html;charset=utf-8');
+            return;
+        }
+
         const host = document.createElement('div');
         host.setAttribute('aria-hidden', 'true');
-        host.style.cssText = 'position:fixed;left:0;top:0;width:760px;background:#fff;z-index:-1;pointer-events:none;';
-        host.innerHTML = buildFullReportHtml(lastAudit);
+        host.style.cssText = 'position:absolute;left:0;top:0;width:780px;background:#ffffff;';
+        host.innerHTML = markup;
         document.body.appendChild(host);
         if (button) button.disabled = true;
 
         const opt = {
-            margin: [10, 10, 10, 10],
-            filename: reportFilename(lastAudit, 'pdf'),
+            margin: 10,
+            filename: filename,
             image: { type: 'jpeg', quality: 0.95 },
-            html2canvas: { scale: 1.5, useCORS: true, logging: false, backgroundColor: '#ffffff' },
+            html2canvas: { scale: 1, useCORS: true, logging: false, backgroundColor: '#ffffff' },
             jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-            pagebreak: { mode: ['css', 'legacy'], avoid: ['.block', 'h2'] }
+            pagebreak: { mode: ['legacy'] }
         };
 
-        html2pdf().set(opt).from(host).save().finally(() => {
+        let settled = false;
+        const finish = () => {
+            if (settled) return;
+            settled = true;
             host.remove();
             if (button) button.disabled = false;
-        });
+        };
+
+        try {
+            const task = html2pdf().set(opt).from(host).save();
+            Promise.resolve(task).then(finish).catch(() => {
+                downloadBlob(reportFilename(lastAudit, 'html'), wrapReportDocument(markup), 'text/html;charset=utf-8');
+                finish();
+            });
+        } catch (err) {
+            downloadBlob(reportFilename(lastAudit, 'html'), wrapReportDocument(markup), 'text/html;charset=utf-8');
+            finish();
+        }
+    }
+
+    function wrapReportDocument(markup) {
+        return `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>SEO-отчёт</title></head><body>${markup}</body></html>`;
     }
 
     function collectIssues(audit) {
