@@ -157,7 +157,7 @@
         @media print {
             body { background: #fff !important; }
             .no-print, .pdf-hidden { display: none !important; }
-            .pdf-report-header, .pdf-card, .metric-card, .score-dashboard, .report-section {
+            .pdf-card, .metric-card, .score-dashboard, .report-section {
                 break-inside: avoid !important;
                 page-break-inside: avoid !important;
             }
@@ -226,7 +226,7 @@
         </div>
     </div>
 
-    <main id="pdf-export-root" class="mt-8 space-y-6 pdf-export-surface" aria-live="polite"></main>
+    <main id="results-container" class="mt-8 space-y-6"></main>
 </div>
 
 <!-- Модальное окно EmailJS -->
@@ -278,7 +278,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const urlInput = document.getElementById('url-input');
     const analyzeButton = document.getElementById('analyze-button');
     const spinner = document.getElementById('loading-spinner');
-    const resultsContainer = document.getElementById('pdf-export-root');
+    const resultsContainer = document.getElementById('results-container');
     const actionBar = document.getElementById('action-bar');
 
     form.addEventListener('submit', onAnalyze);
@@ -559,9 +559,9 @@ document.addEventListener('DOMContentLoaded', () => {
         ].filter(Boolean).join(' · ');
 
         return `
-                <section class="pdf-report-header report-section pdf-card bg-white rounded-2xl shadow-lg border border-slate-200 p-6 sm:p-8">
-                    <p class="text-xs font-semibold uppercase tracking-wide text-blue-700 mb-2">SEO-отчёт</p>
-                    <h2 class="text-xl font-bold text-slate-900 mb-4">Сводка и оценка</h2>
+            <div id="pdf-export-root" class="space-y-6 pdf-export-surface">
+                <section class="report-section pdf-card bg-white rounded-2xl shadow-lg border border-slate-200 p-6 sm:p-8">
+                    <h2 class="text-lg font-bold text-slate-900 mb-4">Сводка</h2>
                     <p class="text-sm text-slate-600 mb-2">
                         URL: <a class="text-blue-600 break-all" href="${escapeHtml(audit.page_url)}" target="_blank" rel="noopener">${escapeHtml(audit.page_url)}</a>
                     </p>
@@ -589,7 +589,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     <p class="text-xs text-slate-500 mb-4">Параллельная проверка на бэкенде.</p>
                     ${renderTechFile('robots.txt', audit.robots_txt, robotsRec[0], 'robots')}
                     ${renderTechFile('sitemap.xml', audit.sitemap_xml, sitemapRec[0], 'sitemap')}
-                </section>`;
+                </section>
+            </div>`;
     }
 
     function downloadBlob(filename, text, mime) {
@@ -638,51 +639,28 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function downloadPdf() {
-        const source = document.getElementById('pdf-export-root');
-        if (!source || !lastAudit || typeof html2pdf === 'undefined') return;
+        const element = document.getElementById('pdf-export-root');
+        if (!element || !lastAudit || typeof html2pdf === 'undefined') return;
 
         const button = document.getElementById('download-pdf-button');
         if (button) button.disabled = true;
 
         downloadTechFilesBundle(lastAudit);
 
-        const savedScrollX = window.scrollX;
-        const savedScrollY = window.scrollY;
-
         document.body.classList.add('pdf-exporting');
-        window.scrollTo(0, Math.max(0, source.offsetTop - 12));
 
         const opt = {
             margin: 10,
             filename: reportFilename(lastAudit, 'pdf'),
             image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: {
-                scale: 2,
-                useCORS: true,
-                logging: false,
-                backgroundColor: '#ffffff',
-                scrollX: 0,
-                scrollY: -window.scrollY,
-                windowWidth: document.documentElement.clientWidth,
-                windowHeight: document.documentElement.scrollHeight
-            },
+            html2canvas: { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff' },
             jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-            pagebreak: {
-                mode: ['css', 'legacy'],
-                avoid: ['.pdf-report-header', '.metric-card', '.score-dashboard']
-            }
+            pagebreak: { mode: ['avoid-all', 'css'] }
         };
 
-        const finish = () => {
+        html2pdf().set(opt).from(element).save().finally(() => {
             document.body.classList.remove('pdf-exporting');
-            window.scrollTo(savedScrollX, savedScrollY);
             if (button) button.disabled = false;
-        };
-
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                html2pdf().set(opt).from(source).save().finally(finish);
-            });
         });
     }
 
