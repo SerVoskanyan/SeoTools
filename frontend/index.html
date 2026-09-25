@@ -165,6 +165,48 @@
 
         .pdf-hidden { display: none !important; }
 
+        /* Клон отчёта для html2pdf — не трогаем видимый layout */
+        .pdf-export-host {
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: 794px;
+            max-width: 794px;
+            z-index: -1;
+            opacity: 0.01;
+            pointer-events: none;
+            overflow: visible;
+            background: #fff;
+        }
+        .pdf-export-host #pdf-export-clone {
+            width: 794px;
+            max-width: 794px;
+            background: #fff;
+        }
+        .pdf-export-host .report-section {
+            break-inside: avoid;
+            page-break-inside: avoid;
+            box-shadow: none !important;
+            border: 1px solid #e2e8f0 !important;
+            margin-bottom: 1rem !important;
+        }
+        .pdf-export-host .pdf-card,
+        .pdf-export-host .metric-card {
+            break-inside: avoid;
+            page-break-inside: avoid;
+            box-shadow: none !important;
+        }
+        .pdf-export-host .no-print {
+            display: none !important;
+        }
+        .pdf-export-host .space-y-6 > :not([hidden]) ~ :not([hidden]) {
+            margin-top: 1.5rem;
+        }
+        .pdf-export-host pre.code-block {
+            max-height: none !important;
+            overflow: visible !important;
+        }
+
         #email-modal:not(.hidden) { display: flex; }
     </style>
 </head>
@@ -596,37 +638,73 @@ document.addEventListener('DOMContentLoaded', () => {
         return `seo-audit-${host}.${ext}`;
     }
 
-    function onTechFileDownload(event) {
-        const button = event.target.closest('[data-download-tech]');
-        if (!button || button.disabled || !lastAudit) return;
-        const kind = button.getAttribute('data-download-tech');
-        const file = kind === 'sitemap' ? lastAudit.sitemap_xml : lastAudit.robots_txt;
-        if (!file || !file.available || !file.content) return;
+    function downloadTechFileByKind(kind, audit = lastAudit) {
+        if (!audit) return false;
+        const file = kind === 'sitemap' ? audit.sitemap_xml : audit.robots_txt;
+        if (!file || !file.available || !file.content) return false;
         const filename = kind === 'sitemap' ? 'sitemap.xml' : 'robots.txt';
         const mime = kind === 'sitemap'
             ? 'application/xml;charset=utf-8'
             : 'text/plain;charset=utf-8';
         downloadBlob(filename, file.content, mime);
+        return true;
+    }
+
+    function downloadTechFilesBundle(audit = lastAudit) {
+        ['robots', 'sitemap'].forEach((kind, index) => {
+            window.setTimeout(() => downloadTechFileByKind(kind, audit), index * 120);
+        });
+    }
+
+    function onTechFileDownload(event) {
+        const button = event.target.closest('[data-download-tech]');
+        if (!button || button.disabled || !lastAudit) return;
+        const kind = button.getAttribute('data-download-tech');
+        downloadTechFileByKind(kind, lastAudit);
+    }
+
+    function buildPdfExportClone(source) {
+        const clone = source.cloneNode(true);
+        clone.id = 'pdf-export-clone';
+        return clone;
     }
 
     function downloadPdf() {
-        const element = document.getElementById('pdf-export-root') || document.getElementById('results-container');
-        if (!element || !lastAudit || typeof html2pdf === 'undefined') return;
+        const source = document.getElementById('pdf-export-root');
+        if (!source || !lastAudit || typeof html2pdf === 'undefined') return;
 
-        const hiddenEls = document.querySelectorAll('.no-print, header.no-print');
-        hiddenEls.forEach((el) => el.classList.add('pdf-hidden'));
+        const button = document.getElementById('download-pdf-button');
+        if (button) button.disabled = true;
 
+        downloadTechFilesBundle(lastAudit);
+
+        const host = document.createElement('div');
+        host.className = 'pdf-export-host';
+        host.setAttribute('aria-hidden', 'true');
+        host.appendChild(buildPdfExportClone(source));
+        document.body.appendChild(host);
+
+        const clone = host.querySelector('#pdf-export-clone');
         const opt = {
-            margin: 10,
+            margin: [10, 10, 10, 10],
             filename: reportFilename(lastAudit, 'pdf'),
-            image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2, useCORS: true, logging: false },
+            image: { type: 'jpeg', quality: 0.96 },
+            html2canvas: {
+                scale: 1.5,
+                useCORS: true,
+                logging: false,
+                backgroundColor: '#ffffff',
+                scrollX: 0,
+                scrollY: 0,
+                windowWidth: clone ? clone.scrollWidth : 794
+            },
             jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-            pagebreak: { mode: ['avoid-all', 'css'] }
+            pagebreak: { mode: ['css', 'legacy'], avoid: ['.report-section', '.pdf-card', '.metric-card'] }
         };
 
-        html2pdf().set(opt).from(element).save().finally(() => {
-            hiddenEls.forEach((el) => el.classList.remove('pdf-hidden'));
+        html2pdf().set(opt).from(clone).save().finally(() => {
+            host.remove();
+            if (button) button.disabled = false;
         });
     }
 
