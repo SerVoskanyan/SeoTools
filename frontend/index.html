@@ -165,46 +165,80 @@
 
         .pdf-hidden { display: none !important; }
 
+        .tech-file-downloads {
+            margin-top: 0.25rem;
+        }
+
         /* Клон отчёта для html2pdf — не трогаем видимый layout */
         .pdf-export-host {
-            position: fixed;
-            left: 0;
+            position: absolute;
+            left: -10000px;
             top: 0;
-            width: 794px;
-            max-width: 794px;
-            z-index: -1;
-            opacity: 0.01;
+            width: 720px;
+            max-width: 720px;
             pointer-events: none;
             overflow: visible;
             background: #fff;
+            visibility: hidden;
         }
         .pdf-export-host #pdf-export-clone {
-            width: 794px;
-            max-width: 794px;
+            width: 720px;
+            max-width: 720px;
             background: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 14px;
+            line-height: 1.45;
+            color: #0f172a;
+        }
+        .pdf-export-host #pdf-export-clone * {
+            box-sizing: border-box;
         }
         .pdf-export-host .report-section {
-            break-inside: avoid;
-            page-break-inside: avoid;
             box-shadow: none !important;
             border: 1px solid #e2e8f0 !important;
-            margin-bottom: 1rem !important;
+            border-radius: 0.75rem !important;
+            margin-bottom: 1.25rem !important;
+            padding: 1.25rem 1.5rem !important;
+            background: #fff !important;
         }
         .pdf-export-host .pdf-card,
         .pdf-export-host .metric-card {
-            break-inside: avoid;
-            page-break-inside: avoid;
             box-shadow: none !important;
+            margin-bottom: 1rem !important;
+            padding: 1rem 1.15rem !important;
         }
-        .pdf-export-host .no-print {
-            display: none !important;
+        .pdf-export-host .tech-file-header {
+            display: block !important;
+        }
+        .pdf-export-host .tech-file-header h3 {
+            display: inline-block;
+            margin: 0 0.5rem 0 0;
+            vertical-align: middle;
+        }
+        .pdf-export-host .tech-file-header .status-tag-ok,
+        .pdf-export-host .tech-file-header .status-tag-warn,
+        .pdf-export-host .tech-file-header .status-tag-crit,
+        .pdf-export-host .tech-file-header [class*="status-tag"] {
+            vertical-align: middle;
+        }
+        .pdf-export-host .state-ok,
+        .pdf-export-host .state-fix {
+            overflow: visible;
+            line-height: 1.45;
+        }
+        .pdf-export-host .state-metric-value,
+        .pdf-export-host .state-fix-row {
+            word-break: break-word;
+            overflow-wrap: anywhere;
         }
         .pdf-export-host .space-y-6 > :not([hidden]) ~ :not([hidden]) {
-            margin-top: 1.5rem;
+            margin-top: 1.25rem;
         }
         .pdf-export-host pre.code-block {
-            max-height: none !important;
-            overflow: visible !important;
+            max-height: 12rem !important;
+            overflow: hidden !important;
+            font-size: 11px !important;
+            line-height: 1.35 !important;
         }
 
         #email-modal:not(.hidden) { display: flex; }
@@ -470,13 +504,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const preview = file.available ? escapeHtml(file.preview || '') : '';
         return `
             <div class="pdf-card metric-card">
-                <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-2 tech-file-header">
                     <h3 class="font-semibold text-slate-900">${escapeHtml(label)}</h3>
-                    <div class="flex flex-wrap items-center gap-2">
-                        ${downloadBtn}
-                        <span class="text-xs font-semibold px-2.5 py-1 rounded-full ${tag.cls}">${tag.text}</span>
-                    </div>
+                    <span class="text-xs font-semibold px-2.5 py-1 rounded-full ${tag.cls}">${tag.text}</span>
                 </div>
+                <div class="no-print tech-file-downloads">${downloadBtn}</div>
                 ${file.error ? `<p class="text-xs mb-1 text-red-600">${escapeHtml(file.error)}</p>` : ''}
                 ${preview ? `<pre class="code-block mt-2 p-3 bg-slate-900 text-emerald-100 rounded-lg overflow-x-auto max-h-48"><code>${preview}</code></pre>` : ''}
                 ${conceptBlockHtml(statusRec, level)}
@@ -584,7 +616,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ].filter(Boolean).join(' · ');
 
         return `
-            <div id="pdf-export-root" class="space-y-6">
+            <div id="pdf-export-root" class="space-y-6 pdf-export-surface">
                 <section class="report-section pdf-card bg-white rounded-2xl shadow-lg border border-slate-200 p-6 sm:p-8">
                     <h2 class="text-lg font-bold text-slate-900 mb-4">Сводка</h2>
                     <p class="text-sm text-slate-600 mb-2">
@@ -666,6 +698,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function buildPdfExportClone(source) {
         const clone = source.cloneNode(true);
         clone.id = 'pdf-export-clone';
+        clone.querySelectorAll('.no-print, .tech-file-downloads, [data-download-tech]').forEach((el) => {
+            el.remove();
+        });
         return clone;
     }
 
@@ -685,21 +720,23 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.appendChild(host);
 
         const clone = host.querySelector('#pdf-export-clone');
+        const exportWidth = 720;
         const opt = {
-            margin: [10, 10, 10, 10],
+            margin: 10,
             filename: reportFilename(lastAudit, 'pdf'),
-            image: { type: 'jpeg', quality: 0.96 },
+            image: { type: 'jpeg', quality: 0.98 },
             html2canvas: {
-                scale: 1.5,
+                scale: 2,
                 useCORS: true,
                 logging: false,
                 backgroundColor: '#ffffff',
                 scrollX: 0,
                 scrollY: 0,
-                windowWidth: clone ? clone.scrollWidth : 794
+                width: exportWidth,
+                windowWidth: exportWidth
             },
             jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-            pagebreak: { mode: ['css', 'legacy'], avoid: ['.report-section', '.pdf-card', '.metric-card'] }
+            pagebreak: { mode: ['css'] }
         };
 
         html2pdf().set(opt).from(clone).save().finally(() => {
