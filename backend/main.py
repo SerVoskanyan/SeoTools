@@ -6,10 +6,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urljoin, urlparse
+
+logger = logging.getLogger("seo_analyzer")
 
 import httpx
 from bs4 import BeautifulSoup
@@ -29,29 +33,68 @@ MAX_DETAIL_URLS = 100
 TITLE_LEN_OK = (30, 65)
 DESC_LEN_OK = (70, 160)
 
-USER_AGENTS = [
-    (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-    ),
-    (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0"
-    ),
-    (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-    ),
-    (
-        "Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0"
-    ),
-]
+@dataclass(frozen=True)
+class BrowserProfile:
+    user_agent: str
+    sec_ch_ua: str | None
+    sec_ch_ua_platform: str | None
+    accept_language: str
 
-SEC_CH_UA_VARIANTS = [
-    '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-    '"Microsoft Edge";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-    '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-    '"Firefox";v="133"',
+
+BROWSER_PROFILES: list[BrowserProfile] = [
+    BrowserProfile(
+        user_agent=(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ),
+        sec_ch_ua='"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        sec_ch_ua_platform='"Windows"',
+        accept_language="ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+    ),
+    BrowserProfile(
+        user_agent=(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
+        ),
+        sec_ch_ua='"Chromium";v="132", "Google Chrome";v="132", "Not_A Brand";v="24"',
+        sec_ch_ua_platform='"Windows"',
+        accept_language="en-US,en;q=0.9,ru;q=0.8",
+    ),
+    BrowserProfile(
+        user_agent=(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ),
+        sec_ch_ua='"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        sec_ch_ua_platform='"macOS"',
+        accept_language="ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+    ),
+    BrowserProfile(
+        user_agent=(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+            "(KHTML, like Gecko) Version/18.2 Safari/605.1.15"
+        ),
+        sec_ch_ua=None,
+        sec_ch_ua_platform=None,
+        accept_language="ru-RU,ru;q=0.9,en;q=0.8",
+    ),
+    BrowserProfile(
+        user_agent=(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0"
+        ),
+        sec_ch_ua='"Microsoft Edge";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        sec_ch_ua_platform='"Windows"',
+        accept_language="en-US,en;q=0.9",
+    ),
+    BrowserProfile(
+        user_agent=(
+            "Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0"
+        ),
+        sec_ch_ua=None,
+        sec_ch_ua_platform=None,
+        accept_language="ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+    ),
 ]
 
 REFERERS = [
@@ -60,6 +103,21 @@ REFERERS = [
     "https://yandex.ru/search/",
     "https://www.bing.com/",
 ]
+
+BOT_CHALLENGE_MARKERS = (
+    "cf-browser-verification",
+    "challenge-platform",
+    "just a moment",
+    "checking your browser",
+    "ddos-guard",
+    "attention required! | cloudflare",
+    "enable javascript and cookies to continue",
+    "cf-chl-bypass",
+    "captcha-box",
+    "perimeterx",
+    "datadome",
+    "geo.captcha-delivery.com",
+)
 
 NOT_FOUND_PROBE_PATH = "/seo-check-404-page-test-123"
 
@@ -89,27 +147,93 @@ GENERATOR_PATTERNS: list[tuple[str, str]] = [
 
 
 def build_headers(attempt: int) -> dict[str, str]:
-    idx = attempt % len(USER_AGENTS)
-    return {
-        "User-Agent": USER_AGENTS[idx],
+    profile = BROWSER_PROFILES[attempt % len(BROWSER_PROFILES)]
+    sec_fetch_site = "none" if attempt == 0 else "cross-site"
+    headers: dict[str, str] = {
+        "User-Agent": profile.user_agent,
         "Accept": (
             "text/html,application/xhtml+xml,application/xml;q=0.9,"
-            "image/avif,image/webp,image/apng,*/*;q=0.8"
+            "image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
         ),
-        "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
+        "Accept-Language": profile.accept_language,
+        "Accept-Encoding": "gzip, deflate, br, zstd",
+        "Cache-Control": "max-age=0",
         "Upgrade-Insecure-Requests": "1",
         "Sec-Fetch-Dest": "document",
         "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "cross-site",
+        "Sec-Fetch-Site": sec_fetch_site,
         "Sec-Fetch-User": "?1",
-        "Sec-Ch-Ua": SEC_CH_UA_VARIANTS[idx],
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"Windows"' if idx < 2 else ('"macOS"' if idx == 2 else '"Linux"'),
         "Referer": REFERERS[attempt % len(REFERERS)],
+        "Priority": "u=0, i",
     }
+    if profile.sec_ch_ua:
+        headers["Sec-Ch-Ua"] = profile.sec_ch_ua
+        headers["Sec-Ch-Ua-Mobile"] = "?0"
+        if profile.sec_ch_ua_platform:
+            headers["Sec-Ch-Ua-Platform"] = profile.sec_ch_ua_platform
+    return headers
+
+
+def waf_hint_from_headers(response_headers: dict[str, str]) -> str | None:
+    server = (header_value(response_headers, "server") or "").lower()
+    if "cloudflare" in server:
+        return "Cloudflare"
+    if header_value(response_headers, "cf-ray"):
+        return "Cloudflare"
+    if header_value(response_headers, "x-dd-b"):
+        return "DataDome"
+    if header_value(response_headers, "x-sucuri-id"):
+        return "Sucuri WAF"
+    if "akamaighost" in server or header_value(response_headers, "x-akamai-transformed"):
+        return "Akamai"
+    return None
+
+
+def looks_like_bot_challenge(html: str, response_headers: dict[str, str]) -> bool:
+    if waf_hint_from_headers(response_headers):
+        sample = html[:8000].lower()
+        if any(marker in sample for marker in BOT_CHALLENGE_MARKERS):
+            return True
+        if len(html.strip()) < 500 and "cloudflare" in sample:
+            return True
+    sample = html[:12000].lower()
+    if "just a moment" in sample and "cloudflare" in sample:
+        return True
+    if "challenge-platform" in sample or "cf-browser-verification" in sample:
+        return True
+    return False
+
+
+def humanize_fetch_error(meta: FetchMeta) -> str:
+    code = meta.status_code
+    err = (meta.error or "").lower()
+    waf = waf_hint_from_headers(meta.response_headers)
+
+    if meta.error == "bot_protection":
+        waf_part = f" ({waf})" if waf else ""
+        return (
+            "Не удалось получить доступ к сайту: сработала защита от ботов"
+            f"{waf_part}. Страница требует браузер с JavaScript."
+        )
+    if code == 403:
+        waf_part = f" ({waf})" if waf else ""
+        return f"Не удалось получить доступ к сайту: возможна защита от ботов (403){waf_part}."
+    if code == 429:
+        return "Сайт временно ограничил число запросов (429). Попробуйте позже."
+    if code in (503, 520, 521, 522, 523, 524):
+        waf_part = f" ({waf})" if waf else ""
+        return f"Сайт недоступен или отдаёт страницу проверки (HTTP {code}){waf_part}."
+    if code == 408 or "timeout" in err:
+        return "Превышено время ожидания ответа от сайта."
+    if code == 401:
+        return "Доступ к странице запрещён (401)."
+    if code >= 400 and code < 500:
+        return f"Сайт отклонил запрос (HTTP {code})."
+    if code >= 500:
+        return f"Ошибка на стороне сайта (HTTP {code})."
+    if meta.error:
+        return f"Не удалось загрузить страницу: {meta.error}."
+    return "Не удалось загрузить страницу."
 
 
 def normalize_header_map(headers: httpx.Headers) -> dict[str, str]:
@@ -265,6 +389,7 @@ async def fetch_url_resilient(url: str) -> tuple[str | None, FetchMeta]:
     last_status = 0
     last_error: str | None = None
     final_url = url
+    last_response_headers: dict[str, str] = {}
 
     for attempt in range(MAX_FETCH_ATTEMPTS):
         headers = build_headers(attempt)
@@ -277,8 +402,23 @@ async def fetch_url_resilient(url: str) -> tuple[str | None, FetchMeta]:
                 response = await client.get(url)
                 last_status = response.status_code
                 final_url = str(response.url)
+                last_response_headers = normalize_header_map(response.headers)
+
+                logger.info(
+                    "fetch attempt=%s url=%s status=%s final_url=%s",
+                    attempt + 1,
+                    url,
+                    response.status_code,
+                    final_url,
+                )
 
                 if response.status_code in RETRY_STATUSES and attempt < MAX_FETCH_ATTEMPTS - 1:
+                    logger.warning(
+                        "fetch retryable status=%s attempt=%s url=%s",
+                        response.status_code,
+                        attempt + 1,
+                        url,
+                    )
                     await asyncio.sleep(0.4 * (attempt + 1))
                     continue
 
@@ -286,11 +426,18 @@ async def fetch_url_resilient(url: str) -> tuple[str | None, FetchMeta]:
                     last_error = f"HTTP {response.status_code}"
                     if response.status_code in RETRY_STATUSES and attempt < MAX_FETCH_ATTEMPTS - 1:
                         continue
+                    logger.error(
+                        "fetch failed status=%s url=%s attempts=%s",
+                        response.status_code,
+                        url,
+                        attempt + 1,
+                    )
                     return None, FetchMeta(
                         status_code=response.status_code,
                         final_url=final_url,
                         attempts=attempt + 1,
                         error=last_error,
+                        response_headers=last_response_headers,
                     )
 
                 text = response.text
@@ -299,11 +446,34 @@ async def fetch_url_resilient(url: str) -> tuple[str | None, FetchMeta]:
                     if attempt < MAX_FETCH_ATTEMPTS - 1:
                         await asyncio.sleep(0.3)
                         continue
+                    logger.error("fetch empty body url=%s status=%s", url, response.status_code)
                     return None, FetchMeta(
                         status_code=response.status_code,
                         final_url=final_url,
                         attempts=attempt + 1,
                         error=last_error,
+                        response_headers=last_response_headers,
+                    )
+
+                if looks_like_bot_challenge(text, last_response_headers):
+                    last_error = "bot_protection"
+                    last_status = response.status_code
+                    logger.warning(
+                        "fetch bot challenge detected url=%s status=%s waf=%s attempt=%s",
+                        url,
+                        response.status_code,
+                        waf_hint_from_headers(last_response_headers),
+                        attempt + 1,
+                    )
+                    if attempt < MAX_FETCH_ATTEMPTS - 1:
+                        await asyncio.sleep(0.6 * (attempt + 1))
+                        continue
+                    return None, FetchMeta(
+                        status_code=response.status_code,
+                        final_url=final_url,
+                        attempts=attempt + 1,
+                        error=last_error,
+                        response_headers=last_response_headers,
                     )
 
                 return text, FetchMeta(
@@ -311,23 +481,37 @@ async def fetch_url_resilient(url: str) -> tuple[str | None, FetchMeta]:
                     final_url=final_url,
                     attempts=attempt + 1,
                     error=None,
-                    response_headers=normalize_header_map(response.headers),
+                    response_headers=last_response_headers,
                 )
         except httpx.TimeoutException:
             last_error = "Request timeout"
             last_status = 408
+            logger.warning("fetch timeout attempt=%s url=%s", attempt + 1, url)
         except httpx.RequestError as exc:
             last_error = str(exc)
             last_status = 0
+            logger.warning(
+                "fetch request error attempt=%s url=%s reason=%s",
+                attempt + 1,
+                url,
+                exc,
+            )
 
         if attempt < MAX_FETCH_ATTEMPTS - 1:
             await asyncio.sleep(0.5 * (attempt + 1))
 
+    logger.error(
+        "fetch exhausted retries url=%s last_status=%s error=%s",
+        url,
+        last_status,
+        last_error,
+    )
     return None, FetchMeta(
         status_code=last_status,
         final_url=final_url,
         attempts=MAX_FETCH_ATTEMPTS,
         error=last_error or "Fetch failed",
+        response_headers=last_response_headers,
     )
 
 
@@ -1607,77 +1791,97 @@ async def health() -> dict[str, str]:
 async def analyze(body: AnalyzeRequest) -> AnalyzeResponse:
     page_url = normalize_page_url(str(body.url))
 
-    html, fetch_meta = await fetch_url_resilient(page_url)
-    if html is None:
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "message": "Не удалось загрузить страницу",
-                "fetch": fetch_meta.model_dump(),
-            },
+    try:
+        html, fetch_meta = await fetch_url_resilient(page_url)
+        if html is None:
+            message = humanize_fetch_error(fetch_meta)
+            logger.error(
+                "analyze fetch failed url=%s status=%s message=%s fetch=%s",
+                page_url,
+                fetch_meta.status_code,
+                message,
+                fetch_meta.model_dump(),
+            )
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "message": message,
+                    "fetch": fetch_meta.model_dump(),
+                },
+            )
+
+        effective_url = fetch_meta.final_url or page_url
+        audit = parse_html_audit(html, effective_url)
+
+        parsed = urlparse(effective_url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        robots_task = fetch_tech_file(origin, "/robots.txt")
+        sitemap_task = fetch_tech_file(origin, "/sitemap.xml")
+        server_task = analyze_server_checks(effective_url, fetch_meta.response_headers)
+        robots_txt, sitemap_xml, server_recs = await asyncio.gather(
+            robots_task, sitemap_task, server_task
         )
 
-    effective_url = fetch_meta.final_url or page_url
-    audit = parse_html_audit(html, effective_url)
+        soup = BeautifulSoup(html, "lxml")
+        tech = detect_tech_stack(html, soup, fetch_meta.response_headers)
 
-    parsed = urlparse(effective_url)
-    origin = f"{parsed.scheme}://{parsed.netloc}"
-    robots_task = fetch_tech_file(origin, "/robots.txt")
-    sitemap_task = fetch_tech_file(origin, "/sitemap.xml")
-    server_task = analyze_server_checks(effective_url, fetch_meta.response_headers)
-    robots_txt, sitemap_xml, server_recs = await asyncio.gather(
-        robots_task, sitemap_task, server_task
-    )
+        checks = build_checks(
+            audit["meta"],
+            audit["schema_org"],
+            audit["headings"],
+            audit["images"],
+            audit["links"],
+            audit["security"],
+            robots_txt,
+            sitemap_xml,
+        )
+        recommendations = build_recommendations(
+            checks,
+            audit["meta"],
+            audit["schema_org"],
+            audit["headings"],
+            audit["images"],
+            audit["links"],
+            audit["security"],
+            robots_txt,
+            sitemap_xml,
+            tech,
+            server_recs,
+        )
+        seo_score = compute_seo_score(checks, recommendations)
 
-    soup = BeautifulSoup(html, "lxml")
-    tech = detect_tech_stack(html, soup, fetch_meta.response_headers)
+        analyzed_at = datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
 
-    checks = build_checks(
-        audit["meta"],
-        audit["schema_org"],
-        audit["headings"],
-        audit["images"],
-        audit["links"],
-        audit["security"],
-        robots_txt,
-        sitemap_xml,
-    )
-    recommendations = build_recommendations(
-        checks,
-        audit["meta"],
-        audit["schema_org"],
-        audit["headings"],
-        audit["images"],
-        audit["links"],
-        audit["security"],
-        robots_txt,
-        sitemap_xml,
-        tech,
-        server_recs,
-    )
-    seo_score = compute_seo_score(checks, recommendations)
-
-    analyzed_at = datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
-
-    return AnalyzeResponse(
-        success=True,
-        page_url=effective_url,
-        analyzed_at=analyzed_at,
-        fetch=fetch_meta,
-        seo_score=seo_score,
-        score_label=score_label(seo_score),
-        checks=checks,
-        recommendations=recommendations,
-        tech=tech,
-        meta=audit["meta"],
-        schema_org=audit["schema_org"],
-        headings=audit["headings"],
-        images=audit["images"],
-        links=audit["links"],
-        security=audit["security"],
-        robots_txt=robots_txt,
-        sitemap_xml=sitemap_xml,
-    )
+        return AnalyzeResponse(
+            success=True,
+            page_url=effective_url,
+            analyzed_at=analyzed_at,
+            fetch=fetch_meta,
+            seo_score=seo_score,
+            score_label=score_label(seo_score),
+            checks=checks,
+            recommendations=recommendations,
+            tech=tech,
+            meta=audit["meta"],
+            schema_org=audit["schema_org"],
+            headings=audit["headings"],
+            images=audit["images"],
+            links=audit["links"],
+            security=audit["security"],
+            robots_txt=robots_txt,
+            sitemap_xml=sitemap_xml,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("analyze unexpected error url=%s", page_url)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "Внутренняя ошибка при анализе страницы. Попробуйте другой URL или повторите позже.",
+                "reason": str(exc),
+            },
+        ) from exc
 
 
 _frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
