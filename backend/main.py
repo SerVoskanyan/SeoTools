@@ -5,11 +5,15 @@ SEO Analyzer API — FastAPI backend with anti-bot resilient fetching.
 from __future__ import annotations
 
 import asyncio
+import codecs
 import json
 import logging
 import os
+import re
+import zlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from html import unescape
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
@@ -146,6 +150,150 @@ GENERATOR_PATTERNS: list[tuple[str, str]] = [
 ]
 
 
+def _encoding_token_available(module_name: str) -> bool:
+    try:
+        __import__(module_name)
+    except ImportError:
+        return False
+    return True
+
+
+# Advertise only codecs this process can actually decode.
+# httpx leaves the body compressed when Content-Encoding is br/zstd
+# and the matching package is not installed — that turns HTML and sitemap XML into garbage.
+_ACCEPT_ENCODING_TOKENS = ["gzip", "deflate"]
+if _encoding_token_available("brotli"):
+    _ACCEPT_ENCODING_TOKENS.append("br")
+if _encoding_token_available("zstandard"):
+    _ACCEPT_ENCODING_TOKENS.append("zstd")
+ACCEPT_ENCODING = ", ".join(_ACCEPT_ENCODING_TOKENS)
+
+_SITEMAP_INDEX_RE = re.compile(r"<\s*(?:[\w.-]+:)?sitemapindex\b", re.I)
+_SITEMAP_URLSET_RE = re.compile(r"<\s*(?:[\w.-]+:)?urlset\b", re.I)
+_SITEMAP_LOC_RE = re.compile(
+    r"<\s*(?:(?:sitemap|sm):)?loc\s*>\s*([^<]+?)\s*<\s*/\s*(?:(?:sitemap|sm):)?loc\s*>",
+    re.I,
+)
+_TITLE_RE = re.compile(r"<title\b[^>]*>(.*?)</title>", re.I | re.S)
+_H1_RE = re.compile(r"<h1\b[^>]*>(.*?)</h1>", re.I | re.S)
+_META_TAG_RE = re.compile(r"<meta\b([^>]*)>", re.I)
+_LINK_TAG_RE = re.compile(r"<link\b([^>]*)>", re.I)
+_ATTR_RE = re.compile(
+    r"([:\w-]+)\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s\"'=<>`]+))",
+    re.I,
+)
+_XML_ENCODING_RE = re.compile(
+    rb"""encoding\s*=\s*["']([A-Za-z0-9._\-]+)["']""",
+    re.I,
+)
+_HTML_CHARSET_RE = re.compile(
+    rb"""charset\s*=\s*["']?([A-Za-z0-9._\-]+)""",
+    re.I,
+)
+
+
+def _known_encoding(name: str) -> bool:
+    try:
+        codecs.lookup(name)
+    except LookupError:
+        return False
+    return True
+
+
+def _looks_like_text(data: bytes) -> bool:
+    sample = data.lstrip()[:512]
+    if sample.startswith((b"\xef\xbb\xbf", b"\xff\xfe", b"\xfe\xff")):
+        return True
+    if sample.startswith((b"<", b"{", b"#")):
+        return True
+    if sample[:11].lower().startswith(b"user-agent"):
+        return True
+    if not sample:
+        return True
+    textish = sum(32 <= byte < 127 or byte in (9, 10, 13) for byte in sample)
+    return textish / len(sample) > 0.85
+
+
+def _decompress_payload(data: bytes, content_encoding: str | None) -> bytes:
+    """Inflate bodies httpx left compressed, and sitemap files that are gzip on disk."""
+    if not data or _looks_like_text(data):
+        return data
+
+    encoding = (content_encoding or "").lower()
+    if data.startswith(b"\x1f\x8b") or "gzip" in encoding:
+        try:
+            return zlib.decompress(data, zlib.MAX_WBITS | 16)
+        except zlib.error:
+            logger.warning("gzip decompress failed")
+
+    if data.startswith(b"\x28\xb5\x2f\xfd") or "zstd" in encoding:
+        try:
+            import zstandard
+
+            return zstandard.ZstdDecompressor().decompress(data)
+        except Exception:
+            logger.warning("zstd decompress failed", exc_info=True)
+
+    if "br" in encoding:
+        try:
+            import brotli
+
+            return brotli.decompress(data)
+        except Exception:
+            logger.warning("brotli decompress failed", exc_info=True)
+
+    if "deflate" in encoding:
+        for window_bits in (zlib.MAX_WBITS, -zlib.MAX_WBITS):
+            try:
+                return zlib.decompress(data, window_bits)
+            except zlib.error:
+                continue
+        logger.warning("deflate decompress failed")
+
+    return data
+
+
+def _sniff_declared_encoding(data: bytes) -> str | None:
+    head = data[:2048]
+    for pattern in (_XML_ENCODING_RE, _HTML_CHARSET_RE):
+        match = pattern.search(head)
+        if match:
+            name = match.group(1).decode("ascii", errors="ignore").strip()
+            if name and _known_encoding(name):
+                return name
+    return None
+
+
+def _choose_encoding(data: bytes, response: httpx.Response) -> str:
+    charset = response.charset_encoding
+    if charset and _known_encoding(charset):
+        return charset
+    declared = _sniff_declared_encoding(data)
+    if declared:
+        return declared
+    try:
+        from charset_normalizer import from_bytes
+
+        match = from_bytes(data[:50_000]).best()
+        if match and match.encoding and _known_encoding(match.encoding):
+            return match.encoding
+    except Exception:
+        pass
+    return "utf-8"
+
+
+def decode_response_text(response: httpx.Response) -> str:
+    """Decode a response body after compression, honoring charset and XML/HTML declarations."""
+    data = _decompress_payload(response.content, response.headers.get("content-encoding"))
+    if data is not response.content and not _looks_like_text(data):
+        data = _decompress_payload(data, None)
+    encoding = _choose_encoding(data, response)
+    try:
+        return data.decode(encoding, errors="replace")
+    except LookupError:
+        return data.decode("utf-8", errors="replace")
+
+
 def build_headers(attempt: int) -> dict[str, str]:
     profile = BROWSER_PROFILES[attempt % len(BROWSER_PROFILES)]
     sec_fetch_site = "none" if attempt == 0 else "cross-site"
@@ -156,7 +304,7 @@ def build_headers(attempt: int) -> dict[str, str]:
             "image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
         ),
         "Accept-Language": profile.accept_language,
-        "Accept-Encoding": "gzip, deflate, br, zstd",
+        "Accept-Encoding": ACCEPT_ENCODING,
         "Cache-Control": "max-age=0",
         "Upgrade-Insecure-Requests": "1",
         "Sec-Fetch-Dest": "document",
@@ -440,7 +588,7 @@ async def fetch_url_resilient(url: str) -> tuple[str | None, FetchMeta]:
                         response_headers=last_response_headers,
                     )
 
-                text = response.text
+                text = decode_response_text(response)
                 if not text or not text.strip():
                     last_error = "Empty response body"
                     if attempt < MAX_FETCH_ATTEMPTS - 1:
@@ -541,6 +689,39 @@ async def fetch_probe(
         return 0, url, {}, str(exc)
 
 
+def _clip_preview(text: str) -> str:
+    text = text.strip()
+    if len(text) <= PREVIEW_CHARS:
+        return text
+    return text[: PREVIEW_CHARS - 1] + "…"
+
+
+def _is_sitemap_path(path: str) -> bool:
+    name = path.lower().split("?", 1)[0].rstrip("/")
+    return name.endswith("sitemap.xml") or name.endswith("sitemap_index.xml")
+
+
+def describe_sitemap(xml_text: str) -> tuple[bool, str]:
+    """Recognize both a flat urlset and a sitemap index (<sitemap><loc>)."""
+    text = xml_text.lstrip("\ufeff \t\r\n")
+    head = text[:8000]
+    if _SITEMAP_INDEX_RE.search(head):
+        kind = "sitemapindex"
+    elif _SITEMAP_URLSET_RE.search(head):
+        kind = "urlset"
+    else:
+        return False, _clip_preview(text)
+
+    locs = [unescape(loc.strip()) for loc in _SITEMAP_LOC_RE.findall(text) if loc.strip()]
+    if kind == "sitemapindex":
+        lines = [f"Индекс sitemap (sitemapindex): {len(locs)} файл(ов)"]
+        lines.extend(locs[:20])
+    else:
+        lines = [f"Карта сайта (urlset): {len(locs)} URL"]
+        lines.extend(locs[:12])
+    return True, _clip_preview("\n".join(lines))
+
+
 async def fetch_tech_file(base_origin: str, path: str) -> TechFileBlock:
     file_url = urljoin(base_origin + "/", path.lstrip("/"))
     content, meta = await fetch_url_resilient(file_url)
@@ -553,12 +734,33 @@ async def fetch_tech_file(base_origin: str, path: str) -> TechFileBlock:
             preview="",
             error=meta.error,
         )
-    preview = content[:PREVIEW_CHARS]
+    size_bytes = len(content.encode("utf-8", errors="replace"))
+    if _is_sitemap_path(path):
+        valid, preview = describe_sitemap(content)
+        if not valid:
+            logger.warning("sitemap is not urlset/sitemapindex url=%s", file_url)
+            return TechFileBlock(
+                url=file_url,
+                available=False,
+                status_code=meta.status_code,
+                size_bytes=size_bytes,
+                preview=preview,
+                error="Файл получен, но это не sitemap (нет urlset или sitemapindex)",
+            )
+        return TechFileBlock(
+            url=file_url,
+            available=True,
+            status_code=meta.status_code,
+            size_bytes=size_bytes,
+            preview=preview,
+            error=None,
+        )
+    preview = _clip_preview(content)
     return TechFileBlock(
         url=file_url,
         available=True,
         status_code=meta.status_code,
-        size_bytes=len(content.encode("utf-8", errors="replace")),
+        size_bytes=size_bytes,
         preview=preview,
         error=None,
     )
@@ -580,16 +782,37 @@ def resolve_href(href: str | None, base: str) -> str | None:
         return href
 
 
-def analyze_headings(soup: BeautifulSoup) -> HeadingsBlock:
+def _strip_tags(fragment: str) -> str:
+    text = re.sub(r"<[^>]+>", " ", fragment)
+    return unescape(re.sub(r"\s+", " ", text)).strip()
+
+
+def _regex_h1_texts(html: str) -> list[str]:
+    texts: list[str] = []
+    for match in _H1_RE.finditer(html):
+        text = _strip_tags(match.group(1))[:200]
+        if text:
+            texts.append(text)
+    return texts
+
+
+def analyze_headings(soup: BeautifulSoup, html: str = "") -> HeadingsBlock:
     tags = soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6"])
     items: list[HeadingItem] = []
     for tag in tags:
         name = tag.name.lower()
         level = int(name[1])
-        text = tag.get_text(strip=True)[:200]
+        text = tag.get_text(" ", strip=True)[:200]
         items.append(HeadingItem(tag=name, level=level, text=text))
 
     h1_count = sum(1 for i in items if i.level == 1)
+    if h1_count == 0 and html:
+        fallback = [
+            HeadingItem(tag="h1", level=1, text=text) for text in _regex_h1_texts(html)
+        ]
+        if fallback:
+            items = fallback + items
+            h1_count = len(fallback)
     warnings: list[str] = []
     hierarchy_ok = True
     for i in range(len(items) - 1):
@@ -1717,22 +1940,92 @@ def score_label(score: int) -> str:
     return "Критично"
 
 
+def _parse_tag_attrs(raw_attrs: str) -> dict[str, str]:
+    attrs: dict[str, str] = {}
+    for match in _ATTR_RE.finditer(raw_attrs):
+        key = match.group(1).lower()
+        value = match.group(2)
+        if value is None:
+            value = match.group(3)
+        if value is None:
+            value = match.group(4) or ""
+        attrs[key] = unescape(value).strip()
+    return attrs
+
+
+def _regex_meta_content(html: str, name: str) -> str:
+    wanted = name.lower()
+    for match in _META_TAG_RE.finditer(html):
+        attrs = _parse_tag_attrs(match.group(1))
+        attr_name = (attrs.get("name") or attrs.get("property") or attrs.get("http-equiv") or "").lower()
+        if attr_name == wanted and attrs.get("content"):
+            return attrs["content"]
+    return ""
+
+
+def _regex_title(html: str) -> str:
+    match = _TITLE_RE.search(html)
+    if not match:
+        return ""
+    return _strip_tags(match.group(1))
+
+
+def _regex_link_href(html: str, rel_name: str) -> str | None:
+    wanted = rel_name.lower()
+    for match in _LINK_TAG_RE.finditer(html):
+        attrs = _parse_tag_attrs(match.group(1))
+        rel = attrs.get("rel", "").lower().split()
+        if wanted in rel and attrs.get("href"):
+            return attrs["href"]
+    return None
+
+
+def _soup_meta_content(soup: BeautifulSoup, name: str) -> str:
+    wanted = name.lower()
+    for tag in soup.find_all("meta"):
+        for attr in ("name", "property", "http-equiv"):
+            value = tag.get(attr)
+            if value and str(value).strip().lower() == wanted:
+                content = tag.get("content")
+                if content and str(content).strip():
+                    return str(content).strip()
+    return ""
+
+
+def _soup_link_href(soup: BeautifulSoup, rel_name: str) -> str | None:
+    wanted = rel_name.lower()
+    for link in soup.find_all("link"):
+        rel = link.get("rel") or []
+        if isinstance(rel, str):
+            rel = rel.split()
+        if any(str(part).lower() == wanted for part in rel):
+            href = link.get("href")
+            if href and str(href).strip():
+                return str(href).strip()
+    return None
+
+
 def parse_html_audit(html: str, page_url: str) -> dict[str, Any]:
     soup = BeautifulSoup(html, "lxml")
     parsed = urlparse(page_url)
 
+    title = ""
     title_el = soup.find("title")
-    title = title_el.get_text(strip=True) if title_el else ""
-    desc_el = soup.find("meta", attrs={"name": "description"})
-    description = (desc_el.get("content") or "").strip() if desc_el else ""
-    canonical_el = soup.find("link", rel=lambda r: r and "canonical" in r)
-    canonical = resolve_href(canonical_el.get("href"), page_url) if canonical_el else None
-    robots_el = soup.find("meta", attrs={"name": "robots"})
-    robots = (robots_el.get("content") or "").strip() if robots_el else ""
+    if title_el:
+        title = title_el.get_text(" ", strip=True)
+    if not title:
+        title = _regex_title(html)
 
-    og_title_el = soup.find("meta", property="og:title")
-    og_desc_el = soup.find("meta", property="og:description")
-    og_image_el = soup.find("meta", property="og:image")
+    description = _soup_meta_content(soup, "description") or _regex_meta_content(html, "description")
+    canonical_href = _soup_link_href(soup, "canonical") or _regex_link_href(html, "canonical")
+    canonical = resolve_href(canonical_href, page_url) if canonical_href else None
+    robots = _soup_meta_content(soup, "robots") or _regex_meta_content(html, "robots")
+    og_title = _soup_meta_content(soup, "og:title") or _regex_meta_content(html, "og:title") or None
+    og_description = (
+        _soup_meta_content(soup, "og:description") or _regex_meta_content(html, "og:description") or None
+    )
+    og_image_raw = _soup_meta_content(soup, "og:image") or _regex_meta_content(html, "og:image")
+    viewport = _soup_meta_content(soup, "viewport") or _regex_meta_content(html, "viewport")
 
     title_count = len(title)
     desc_count = len(description)
@@ -1745,24 +2038,23 @@ def parse_html_audit(html: str, page_url: str) -> dict[str, Any]:
         description_status=meta_field_status(desc_count, DESC_LEN_OK, empty_error=False),
         canonical=canonical,
         robots=robots,
-        og_title=og_title_el.get("content") if og_title_el else None,
-        og_description=og_desc_el.get("content") if og_desc_el else None,
-        og_image=resolve_href(og_image_el.get("content"), page_url) if og_image_el else None,
+        og_title=og_title,
+        og_description=og_description,
+        og_image=resolve_href(og_image_raw, page_url) if og_image_raw else None,
     )
 
     schema_org = analyze_schema(soup)
-    headings = analyze_headings(soup)
+    headings = analyze_headings(soup, html)
     origin = f"{parsed.scheme}://{parsed.netloc}"
     images = analyze_images(soup, origin)
     links = analyze_links(soup, page_url)
 
-    viewport_el = soup.find("meta", attrs={"name": "viewport"})
     has_favicon, favicon_href = detect_favicon(soup, page_url)
 
     security = SecurityBlock(
         is_https=parsed.scheme == "https",
-        has_viewport=viewport_el is not None,
-        viewport_content=viewport_el.get("content") if viewport_el else None,
+        has_viewport=bool(viewport),
+        viewport_content=viewport or None,
         has_favicon=has_favicon,
         favicon_href=favicon_href,
     )
