@@ -146,12 +146,6 @@
         }
         .detail-url-list li { margin-bottom: 0.25rem; word-break: break-all; }
 
-        .tech-file-content {
-            white-space: pre-wrap;
-            word-break: break-word;
-            max-height: none;
-        }
-
         .heading-badge-h1 { background: #dbeafe; color: #1e40af; }
         .heading-badge-h2 { background: #e0e7ff; color: #3730a3; }
         .heading-badge-h3 { background: #ede9fe; color: #5b21b6; }
@@ -431,7 +425,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 : 'Разместите файл в корне сайта и проверьте права, редиректы и CDN.',
             praise: file.available ? 'Файл доступен поисковым роботам — отлично.' : ''
         };
-        const bodyText = techFileDisplayText(file);
+        const preview = file.available ? escapeHtml(file.preview || '') : '';
         return `
             <div class="pdf-card metric-card">
                 <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
@@ -442,14 +436,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 </div>
                 ${file.error ? `<p class="text-xs mb-1 text-red-600">${escapeHtml(file.error)}</p>` : ''}
-                ${bodyText ? `<pre class="code-block tech-file-content mt-2 p-3 bg-slate-900 text-emerald-100 rounded-lg overflow-x-auto"><code>${escapeHtml(bodyText)}</code></pre>` : ''}
+                ${preview ? `<pre class="code-block mt-2 p-3 bg-slate-900 text-emerald-100 rounded-lg overflow-x-auto max-h-48"><code>${preview}</code></pre>` : ''}
                 ${conceptBlockHtml(statusRec, level)}
             </div>`;
-    }
-
-    function techFileDisplayText(file) {
-        if (!file || !file.available) return '';
-        return file.content || file.preview || '';
     }
 
     function renderApiError(url, detail, status) {
