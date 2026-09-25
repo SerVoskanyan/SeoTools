@@ -157,7 +157,7 @@
         @media print {
             body { background: #fff !important; }
             .no-print, .pdf-hidden { display: none !important; }
-            .pdf-card, .score-dashboard, .report-section {
+            .pdf-report-header, .pdf-card, .metric-card, .score-dashboard, .report-section {
                 break-inside: avoid !important;
                 page-break-inside: avoid !important;
             }
@@ -169,76 +169,19 @@
             margin-top: 0.25rem;
         }
 
-        /* Клон отчёта для html2pdf — не трогаем видимый layout */
-        .pdf-export-host {
-            position: absolute;
-            left: -10000px;
-            top: 0;
-            width: 720px;
-            max-width: 720px;
-            pointer-events: none;
-            overflow: visible;
-            background: #fff;
-            visibility: hidden;
+        /* На время html2pdf: скрыть кнопки в отчёте, не перелayout'ить страницу */
+        body.pdf-exporting #pdf-export-root .no-print {
+            display: none !important;
         }
-        .pdf-export-host #pdf-export-clone {
-            width: 720px;
-            max-width: 720px;
-            background: #fff;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            font-size: 14px;
-            line-height: 1.45;
-            color: #0f172a;
+        body.pdf-exporting #pdf-export-root {
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
         }
-        .pdf-export-host #pdf-export-clone * {
-            box-sizing: border-box;
-        }
-        .pdf-export-host .report-section {
-            box-shadow: none !important;
-            border: 1px solid #e2e8f0 !important;
-            border-radius: 0.75rem !important;
-            margin-bottom: 1.25rem !important;
-            padding: 1.25rem 1.5rem !important;
-            background: #fff !important;
-        }
-        .pdf-export-host .pdf-card,
-        .pdf-export-host .metric-card {
-            box-shadow: none !important;
-            margin-bottom: 1rem !important;
-            padding: 1rem 1.15rem !important;
-        }
-        .pdf-export-host .tech-file-header {
-            display: block !important;
-        }
-        .pdf-export-host .tech-file-header h3 {
-            display: inline-block;
-            margin: 0 0.5rem 0 0;
-            vertical-align: middle;
-        }
-        .pdf-export-host .tech-file-header .status-tag-ok,
-        .pdf-export-host .tech-file-header .status-tag-warn,
-        .pdf-export-host .tech-file-header .status-tag-crit,
-        .pdf-export-host .tech-file-header [class*="status-tag"] {
-            vertical-align: middle;
-        }
-        .pdf-export-host .state-ok,
-        .pdf-export-host .state-fix {
-            overflow: visible;
-            line-height: 1.45;
-        }
-        .pdf-export-host .state-metric-value,
-        .pdf-export-host .state-fix-row {
-            word-break: break-word;
-            overflow-wrap: anywhere;
-        }
-        .pdf-export-host .space-y-6 > :not([hidden]) ~ :not([hidden]) {
-            margin-top: 1.25rem;
-        }
-        .pdf-export-host pre.code-block {
-            max-height: 12rem !important;
-            overflow: hidden !important;
-            font-size: 11px !important;
-            line-height: 1.35 !important;
+        /* Тёмные pre html2canvas часто рвёт — на захвате светлая тема */
+        body.pdf-exporting #pdf-export-root pre.code-block {
+            background: #f8fafc !important;
+            color: #0f172a !important;
+            border: 1px solid #e2e8f0;
         }
 
         #email-modal:not(.hidden) { display: flex; }
@@ -283,7 +226,7 @@
         </div>
     </div>
 
-    <main id="results-container" class="mt-8 space-y-6"></main>
+    <main id="pdf-export-root" class="mt-8 space-y-6 pdf-export-surface" aria-live="polite"></main>
 </div>
 
 <!-- Модальное окно EmailJS -->
@@ -335,7 +278,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const urlInput = document.getElementById('url-input');
     const analyzeButton = document.getElementById('analyze-button');
     const spinner = document.getElementById('loading-spinner');
-    const resultsContainer = document.getElementById('results-container');
+    const resultsContainer = document.getElementById('pdf-export-root');
     const actionBar = document.getElementById('action-bar');
 
     form.addEventListener('submit', onAnalyze);
@@ -616,9 +559,9 @@ document.addEventListener('DOMContentLoaded', () => {
         ].filter(Boolean).join(' · ');
 
         return `
-            <div id="pdf-export-root" class="space-y-6 pdf-export-surface">
-                <section class="report-section pdf-card bg-white rounded-2xl shadow-lg border border-slate-200 p-6 sm:p-8">
-                    <h2 class="text-lg font-bold text-slate-900 mb-4">Сводка</h2>
+                <section class="pdf-report-header report-section pdf-card bg-white rounded-2xl shadow-lg border border-slate-200 p-6 sm:p-8">
+                    <p class="text-xs font-semibold uppercase tracking-wide text-blue-700 mb-2">SEO-отчёт</p>
+                    <h2 class="text-xl font-bold text-slate-900 mb-4">Сводка и оценка</h2>
                     <p class="text-sm text-slate-600 mb-2">
                         URL: <a class="text-blue-600 break-all" href="${escapeHtml(audit.page_url)}" target="_blank" rel="noopener">${escapeHtml(audit.page_url)}</a>
                     </p>
@@ -646,8 +589,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <p class="text-xs text-slate-500 mb-4">Параллельная проверка на бэкенде.</p>
                     ${renderTechFile('robots.txt', audit.robots_txt, robotsRec[0], 'robots')}
                     ${renderTechFile('sitemap.xml', audit.sitemap_xml, sitemapRec[0], 'sitemap')}
-                </section>
-            </div>`;
+                </section>`;
     }
 
     function downloadBlob(filename, text, mime) {
@@ -695,15 +637,6 @@ document.addEventListener('DOMContentLoaded', () => {
         downloadTechFileByKind(kind, lastAudit);
     }
 
-    function buildPdfExportClone(source) {
-        const clone = source.cloneNode(true);
-        clone.id = 'pdf-export-clone';
-        clone.querySelectorAll('.no-print, .tech-file-downloads, [data-download-tech]').forEach((el) => {
-            el.remove();
-        });
-        return clone;
-    }
-
     function downloadPdf() {
         const source = document.getElementById('pdf-export-root');
         if (!source || !lastAudit || typeof html2pdf === 'undefined') return;
@@ -713,14 +646,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         downloadTechFilesBundle(lastAudit);
 
-        const host = document.createElement('div');
-        host.className = 'pdf-export-host';
-        host.setAttribute('aria-hidden', 'true');
-        host.appendChild(buildPdfExportClone(source));
-        document.body.appendChild(host);
+        const savedScrollX = window.scrollX;
+        const savedScrollY = window.scrollY;
 
-        const clone = host.querySelector('#pdf-export-clone');
-        const exportWidth = 720;
+        document.body.classList.add('pdf-exporting');
+        window.scrollTo(0, Math.max(0, source.offsetTop - 12));
+
         const opt = {
             margin: 10,
             filename: reportFilename(lastAudit, 'pdf'),
@@ -731,17 +662,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 logging: false,
                 backgroundColor: '#ffffff',
                 scrollX: 0,
-                scrollY: 0,
-                width: exportWidth,
-                windowWidth: exportWidth
+                scrollY: -window.scrollY,
+                windowWidth: document.documentElement.clientWidth,
+                windowHeight: document.documentElement.scrollHeight
             },
             jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-            pagebreak: { mode: ['css'] }
+            pagebreak: {
+                mode: ['css', 'legacy'],
+                avoid: ['.pdf-report-header', '.metric-card', '.score-dashboard']
+            }
         };
 
-        html2pdf().set(opt).from(clone).save().finally(() => {
-            host.remove();
+        const finish = () => {
+            document.body.classList.remove('pdf-exporting');
+            window.scrollTo(savedScrollX, savedScrollY);
             if (button) button.disabled = false;
+        };
+
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                html2pdf().set(opt).from(source).save().finally(finish);
+            });
         });
     }
 
