@@ -214,11 +214,21 @@
         </form>
 
         <div id="action-bar" class="hidden mt-6 flex flex-col sm:flex-row flex-wrap gap-3 justify-center items-center border-t border-slate-100 pt-6">
-            <button type="button" id="download-pdf-button"
-                    class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold py-2.5 px-6 rounded-xl shadow-md shadow-emerald-600/25 transition-colors">
-                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
-                Скачать PDF
-            </button>
+            <div class="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+                <button type="button" id="download-pdf-button"
+                        class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold py-2.5 px-6 rounded-xl shadow-md shadow-emerald-600/25 transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+                    Скачать PDF
+                </button>
+                <label class="inline-flex items-center gap-1.5 text-xs sm:text-sm text-slate-600 cursor-pointer select-none">
+                    <input type="checkbox" id="pdf-bundle-robots" class="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500">
+                    Скачать robots.txt
+                </label>
+                <label class="inline-flex items-center gap-1.5 text-xs sm:text-sm text-slate-600 cursor-pointer select-none">
+                    <input type="checkbox" id="pdf-bundle-sitemap" class="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500">
+                    Скачать sitemap.xml
+                </label>
+            </div>
             <button type="button" id="open-email-modal"
                     class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 px-6 rounded-xl shadow transition-colors">
                 Отправить на Email
@@ -625,10 +635,17 @@ document.addEventListener('DOMContentLoaded', () => {
         return true;
     }
 
-    function downloadTechFilesBundle(audit = lastAudit) {
-        ['robots', 'sitemap'].forEach((kind, index) => {
+    function downloadTechFilesBundle(audit = lastAudit, kinds = ['robots', 'sitemap']) {
+        kinds.forEach((kind, index) => {
             window.setTimeout(() => downloadTechFileByKind(kind, audit), index * 120);
         });
+    }
+
+    function selectedPdfTechFileKinds() {
+        const kinds = [];
+        if (document.getElementById('pdf-bundle-robots')?.checked) kinds.push('robots');
+        if (document.getElementById('pdf-bundle-sitemap')?.checked) kinds.push('sitemap');
+        return kinds;
     }
 
     function onTechFileDownload(event) {
@@ -645,7 +662,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const button = document.getElementById('download-pdf-button');
         if (button) button.disabled = true;
 
-        downloadTechFilesBundle(lastAudit);
+        const techKinds = selectedPdfTechFileKinds();
+        if (techKinds.length) downloadTechFilesBundle(lastAudit, techKinds);
 
         document.body.classList.add('pdf-exporting');
 
