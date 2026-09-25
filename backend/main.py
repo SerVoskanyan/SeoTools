@@ -495,6 +495,7 @@ class TechFileBlock(BaseModel):
     status_code: int | None
     size_bytes: int
     preview: str
+    content: str = ""
     error: str | None = None
 
 
@@ -753,6 +754,7 @@ async def fetch_tech_file(base_origin: str, path: str) -> TechFileBlock:
             status_code=meta.status_code,
             size_bytes=size_bytes,
             preview=preview,
+            content=content,
             error=None,
         )
     preview = _clip_preview(content)
@@ -762,6 +764,7 @@ async def fetch_tech_file(base_origin: str, path: str) -> TechFileBlock:
         status_code=meta.status_code,
         size_bytes=size_bytes,
         preview=preview,
+        content=content,
         error=None,
     )
 

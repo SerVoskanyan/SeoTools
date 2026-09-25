@@ -199,6 +199,10 @@
                     class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 px-6 rounded-xl shadow transition-colors">
                 Скачать PDF
             </button>
+            <button type="button" id="download-report-button"
+                    class="bg-slate-800 hover:bg-slate-900 text-white font-semibold py-2.5 px-6 rounded-xl shadow transition-colors">
+                Скачать отчёт
+            </button>
             <button type="button" id="open-email-modal"
                     class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 px-6 rounded-xl shadow transition-colors">
                 Отправить на Email
@@ -263,6 +267,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     form.addEventListener('submit', onAnalyze);
     document.getElementById('download-pdf-button').addEventListener('click', downloadPdf);
+    document.getElementById('download-report-button').addEventListener('click', downloadFullReport);
+    resultsContainer.addEventListener('click', onTechFileDownload);
     setupEmailModal();
 
     async function onAnalyze(event) {
@@ -398,9 +404,17 @@ document.addEventListener('DOMContentLoaded', () => {
             </section>`;
     }
 
-    function renderTechFile(label, file, rec) {
+    function renderTechFile(label, file, rec, kind) {
         const level = file.available ? 'pass' : 'crit';
         const tag = statusTagLabel(level);
+        const canDownload = Boolean(file.available && file.content);
+        const downloadBtn = `
+            <button type="button" data-download-tech="${escapeHtml(kind)}"
+                    class="no-print text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-300 text-slate-800 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                    ${canDownload ? '' : 'disabled'}
+                    title="${canDownload ? `Скачать ${escapeHtml(label)}` : 'Файл недоступен'}">
+                Скачать ${escapeHtml(label)}
+            </button>`;
         const statusRec = rec || {
             status: file.available ? 'ok' : 'error',
             title: label,
@@ -418,9 +432,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const preview = file.available ? escapeHtml(file.preview || '') : '';
         return `
             <div class="pdf-card metric-card">
-                <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
                     <h3 class="font-semibold text-slate-900">${escapeHtml(label)}</h3>
-                    <span class="text-xs font-semibold px-2.5 py-1 rounded-full ${tag.cls}">${tag.text}</span>
+                    <div class="flex flex-wrap items-center gap-2">
+                        ${downloadBtn}
+                        <span class="text-xs font-semibold px-2.5 py-1 rounded-full ${tag.cls}">${tag.text}</span>
+                    </div>
                 </div>
                 ${file.error ? `<p class="text-xs mb-1 text-red-600">${escapeHtml(file.error)}</p>` : ''}
                 ${preview ? `<pre class="code-block mt-2 p-3 bg-slate-900 text-emerald-100 rounded-lg overflow-x-auto max-h-48"><code>${preview}</code></pre>` : ''}
@@ -557,10 +574,153 @@ document.addEventListener('DOMContentLoaded', () => {
                 <section class="report-section bg-white rounded-2xl shadow-lg border border-slate-200 p-6 sm:p-8">
                     <h2 class="text-lg font-bold text-slate-900 mb-4">robots.txt и sitemap.xml</h2>
                     <p class="text-xs text-slate-500 mb-4">Параллельная проверка на бэкенде.</p>
-                    ${renderTechFile('robots.txt', audit.robots_txt, robotsRec[0])}
-                    ${renderTechFile('sitemap.xml', audit.sitemap_xml, sitemapRec[0])}
+                    ${renderTechFile('robots.txt', audit.robots_txt, robotsRec[0], 'robots')}
+                    ${renderTechFile('sitemap.xml', audit.sitemap_xml, sitemapRec[0], 'sitemap')}
                 </section>
             </div>`;
+    }
+
+    function downloadBlob(filename, text, mime) {
+        const blob = new Blob([text], { type: mime });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    function reportFilename(audit, ext) {
+        let host = 'site';
+        try {
+            host = new URL(audit.page_url).hostname.replace(/[^\w.-]+/g, '_');
+        } catch { /* keep fallback */ }
+        return `seo-audit-${host}.${ext}`;
+    }
+
+    function onTechFileDownload(event) {
+        const button = event.target.closest('[data-download-tech]');
+        if (!button || button.disabled || !lastAudit) return;
+        const kind = button.getAttribute('data-download-tech');
+        const file = kind === 'sitemap' ? lastAudit.sitemap_xml : lastAudit.robots_txt;
+        if (!file || !file.available || !file.content) return;
+        const filename = kind === 'sitemap' ? 'sitemap.xml' : 'robots.txt';
+        const mime = kind === 'sitemap'
+            ? 'application/xml;charset=utf-8'
+            : 'text/plain;charset=utf-8';
+        downloadBlob(filename, file.content, mime);
+    }
+
+    function reportStatusLabel(status) {
+        if (status === 'error') return 'Критично';
+        if (status === 'warning') return 'Внимание';
+        if (status === 'ok') return 'Отлично';
+        return status || '—';
+    }
+
+    function buildFullReportHtml(audit) {
+        const recs = audit.recommendations || [];
+        const blocks = recs.map((rec) => {
+            const urls = (rec.detail_urls || [])
+                .map((url) => `<li>${escapeHtml(url)}</li>`)
+                .join('');
+            const chars = rec.char_count != null
+                ? `<p class="meta">Символов: ${rec.char_count}</p>`
+                : '';
+            return `
+            <section class="block">
+                <h2>${escapeHtml(rec.title)} <span class="status status-${escapeHtml(rec.status || 'ok')}">${escapeHtml(reportStatusLabel(rec.status))}</span></h2>
+                <p class="meta">${escapeHtml(rec.category || '')}${rec.id ? ` · ${escapeHtml(rec.id)}` : ''}</p>
+                <p><strong>Как сейчас:</strong> ${escapeHtml(rec.value || '—')}</p>
+                ${chars}
+                ${urls ? `<ul>${urls}</ul>` : ''}
+                ${rec.expected ? `<p><strong>Как должно быть:</strong> ${escapeHtml(rec.expected)}</p>` : ''}
+                ${rec.recommendation ? `<p><strong>Решение:</strong> ${escapeHtml(rec.recommendation)}</p>` : ''}
+                ${rec.praise ? `<p><strong>Комментарий:</strong> ${escapeHtml(rec.praise)}</p>` : ''}
+            </section>`;
+        }).join('');
+
+        const headingItems = (audit.headings && audit.headings.items) || [];
+        const headingList = headingItems.length
+            ? `<ul>${headingItems.map((item) => `<li><strong>${escapeHtml(String(item.tag || '').toUpperCase())}</strong> ${escapeHtml(item.text || '')}</li>`).join('')}</ul>`
+            : '<p>Заголовки не найдены.</p>';
+
+        const meta = audit.meta || {};
+        const tech = audit.tech || {};
+        const images = audit.images || {};
+        const links = audit.links || {};
+        const security = audit.security || {};
+        const robots = audit.robots_txt || {};
+        const sitemap = audit.sitemap_xml || {};
+        const missingAlt = (images.missing_alt_urls || []).map((url) => `<li>${escapeHtml(url)}</li>`).join('');
+        const unsafe = (links.unsafe_blank_urls || []).map((url) => `<li>${escapeHtml(url)}</li>`).join('');
+
+        return `<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>SEO-отчёт — ${escapeHtml(audit.page_url || '')}</title>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #0f172a; margin: 32px; line-height: 1.5; }
+h1 { font-size: 28px; margin-bottom: 4px; }
+h2 { font-size: 18px; margin: 0 0 8px; }
+.lead { color: #475569; }
+.block { border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 18px; margin: 12px 0; }
+.meta { color: #64748b; font-size: 13px; }
+.status { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; vertical-align: middle; }
+.status-ok { background: #dcfce7; color: #166534; }
+.status-warning { background: #fef9c3; color: #854d0e; }
+.status-error { background: #fee2e2; color: #991b1b; }
+ul { margin: 8px 0 0; padding-left: 18px; }
+li { margin: 2px 0; word-break: break-all; }
+pre { white-space: pre-wrap; word-break: break-word; background: #0f172a; color: #d1fae5; padding: 12px; border-radius: 8px; }
+</style>
+</head>
+<body>
+<h1>SEO-отчёт</h1>
+<p class="lead">${escapeHtml(audit.page_url || '')}</p>
+<p>Оценка: <strong>${audit.seo_score}/100</strong> · ${escapeHtml(audit.score_label || '')}<br>
+Дата: ${escapeHtml(audit.analyzed_at || '')}</p>
+<h2>Мета</h2>
+<ul>
+<li>Title: ${escapeHtml(meta.title || '—')} (${meta.title_char_count ?? 0} симв.)</li>
+<li>Description: ${escapeHtml(meta.description || '—')} (${meta.description_char_count ?? 0} симв.)</li>
+<li>Canonical: ${escapeHtml(meta.canonical || '—')}</li>
+<li>Robots: ${escapeHtml(meta.robots || '—')}</li>
+<li>Viewport: ${escapeHtml(security.viewport_content || '—')}</li>
+<li>Язык: ${escapeHtml(tech.html_lang || '—')}</li>
+<li>HTTPS: ${security.is_https ? 'да' : 'нет'}</li>
+<li>Движок: ${escapeHtml(tech.cms_or_engine || '—')}</li>
+</ul>
+<h2>Проверки (${recs.length})</h2>
+${blocks || '<p>Нет данных.</p>'}
+<h2>Заголовки (${headingItems.length})</h2>
+${headingList}
+<h2>Изображения и ссылки</h2>
+<p>Изображений: ${images.total ?? 0}, без alt: ${images.missing_alt_count ?? 0}. Ссылок: ${links.total ?? 0} (внутр. ${links.internal ?? 0}, внешн. ${links.external ?? 0}).</p>
+${missingAlt ? `<p><strong>Без alt</strong></p><ul>${missingAlt}</ul>` : ''}
+${unsafe ? `<p><strong>target=_blank без rel</strong></p><ul>${unsafe}</ul>` : ''}
+<h2>robots.txt</h2>
+<p>${robots.available ? 'Доступен' : 'Недоступен'} · HTTP ${robots.status_code ?? '—'} · ${robots.size_bytes ?? 0} байт<br>${escapeHtml(robots.url || '')}</p>
+${robots.error ? `<p>${escapeHtml(robots.error)}</p>` : ''}
+${robots.preview ? `<pre>${escapeHtml(robots.preview)}</pre>` : ''}
+<h2>sitemap.xml</h2>
+<p>${sitemap.available ? 'Доступен' : 'Недоступен'} · HTTP ${sitemap.status_code ?? '—'} · ${sitemap.size_bytes ?? 0} байт<br>${escapeHtml(sitemap.url || '')}</p>
+${sitemap.error ? `<p>${escapeHtml(sitemap.error)}</p>` : ''}
+${sitemap.preview ? `<pre>${escapeHtml(sitemap.preview)}</pre>` : ''}
+</body>
+</html>`;
+    }
+
+    function downloadFullReport() {
+        if (!lastAudit) return;
+        downloadBlob(
+            reportFilename(lastAudit, 'html'),
+            buildFullReportHtml(lastAudit),
+            'text/html;charset=utf-8'
+        );
     }
 
     function downloadPdf() {
@@ -576,7 +736,7 @@ document.addEventListener('DOMContentLoaded', () => {
             image: { type: 'jpeg', quality: 0.98 },
             html2canvas: { scale: 2, useCORS: true, logging: false },
             jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-            pagebreak: { mode: ['avoid-all', 'css'] }
+            pagebreak: { mode: ['css', 'legacy'] }
         };
 
         html2pdf().set(opt).from(element).save().finally(() => {
