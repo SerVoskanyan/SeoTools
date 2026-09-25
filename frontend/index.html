@@ -196,12 +196,9 @@
 
         <div id="action-bar" class="hidden mt-6 flex flex-col sm:flex-row flex-wrap gap-3 justify-center items-center border-t border-slate-100 pt-6">
             <button type="button" id="download-pdf-button"
-                    class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 px-6 rounded-xl shadow transition-colors">
+                    class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold py-2.5 px-6 rounded-xl shadow-md shadow-emerald-600/25 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
                 Скачать PDF
-            </button>
-            <button type="button" id="download-report-button"
-                    class="bg-slate-800 hover:bg-slate-900 text-white font-semibold py-2.5 px-6 rounded-xl shadow transition-colors">
-                Скачать отчёт
             </button>
             <button type="button" id="open-email-modal"
                     class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 px-6 rounded-xl shadow transition-colors">
@@ -267,7 +264,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     form.addEventListener('submit', onAnalyze);
     document.getElementById('download-pdf-button').addEventListener('click', downloadPdf);
-    document.getElementById('download-report-button').addEventListener('click', downloadFullReport);
     resultsContainer.addEventListener('click', onTechFileDownload);
     setupEmailModal();
 
@@ -656,33 +652,32 @@ document.addEventListener('DOMContentLoaded', () => {
         const sitemap = audit.sitemap_xml || {};
         const missingAlt = (images.missing_alt_urls || []).map((url) => `<li>${escapeHtml(url)}</li>`).join('');
         const unsafe = (links.unsafe_blank_urls || []).map((url) => `<li>${escapeHtml(url)}</li>`).join('');
+        const fetchInfo = audit.fetch
+            ? `HTTP ${audit.fetch.status_code} · попыток: ${audit.fetch.attempts}`
+            : '—';
 
-        return `<!DOCTYPE html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<title>SEO-отчёт — ${escapeHtml(audit.page_url || '')}</title>
+        return `
 <style>
-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #0f172a; margin: 32px; line-height: 1.5; }
-h1 { font-size: 28px; margin-bottom: 4px; }
-h2 { font-size: 18px; margin: 0 0 8px; }
-.lead { color: #475569; }
-.block { border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 18px; margin: 12px 0; }
-.meta { color: #64748b; font-size: 13px; }
-.status { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; vertical-align: middle; }
-.status-ok { background: #dcfce7; color: #166534; }
-.status-warning { background: #fef9c3; color: #854d0e; }
-.status-error { background: #fee2e2; color: #991b1b; }
-ul { margin: 8px 0 0; padding-left: 18px; }
-li { margin: 2px 0; word-break: break-all; }
-pre { white-space: pre-wrap; word-break: break-word; background: #0f172a; color: #d1fae5; padding: 12px; border-radius: 8px; }
+.pdf-source { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #0f172a; background: #fff; padding: 8px 12px 24px; line-height: 1.5; width: 720px; }
+.pdf-source h1 { font-size: 26px; margin: 0 0 4px; }
+.pdf-source h2 { font-size: 18px; margin: 18px 0 8px; }
+.pdf-source .lead, .pdf-source .meta { color: #475569; }
+.pdf-source .meta { font-size: 13px; }
+.pdf-source .block { border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 16px; margin: 10px 0; page-break-inside: avoid; }
+.pdf-source .status { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+.pdf-source .status-ok { background: #dcfce7; color: #166534; }
+.pdf-source .status-warning { background: #fef9c3; color: #854d0e; }
+.pdf-source .status-error { background: #fee2e2; color: #991b1b; }
+.pdf-source ul { margin: 8px 0 0; padding-left: 18px; }
+.pdf-source li { margin: 2px 0; word-break: break-word; }
+.pdf-source pre { white-space: pre-wrap; word-break: break-word; background: #0f172a; color: #d1fae5; padding: 12px; border-radius: 8px; margin: 8px 0 0; overflow: visible; max-height: none; }
 </style>
-</head>
-<body>
+<div class="pdf-source">
 <h1>SEO-отчёт</h1>
 <p class="lead">${escapeHtml(audit.page_url || '')}</p>
 <p>Оценка: <strong>${audit.seo_score}/100</strong> · ${escapeHtml(audit.score_label || '')}<br>
-Дата: ${escapeHtml(audit.analyzed_at || '')}</p>
+Дата: ${escapeHtml(audit.analyzed_at || '')}<br>
+Загрузка: ${escapeHtml(fetchInfo)}</p>
 <h2>Мета</h2>
 <ul>
 <li>Title: ${escapeHtml(meta.title || '—')} (${meta.title_char_count ?? 0} симв.)</li>
@@ -702,45 +697,42 @@ ${headingList}
 <p>Изображений: ${images.total ?? 0}, без alt: ${images.missing_alt_count ?? 0}. Ссылок: ${links.total ?? 0} (внутр. ${links.internal ?? 0}, внешн. ${links.external ?? 0}).</p>
 ${missingAlt ? `<p><strong>Без alt</strong></p><ul>${missingAlt}</ul>` : ''}
 ${unsafe ? `<p><strong>target=_blank без rel</strong></p><ul>${unsafe}</ul>` : ''}
-<h2>robots.txt</h2>
-<p>${robots.available ? 'Доступен' : 'Недоступен'} · HTTP ${robots.status_code ?? '—'} · ${robots.size_bytes ?? 0} байт<br>${escapeHtml(robots.url || '')}</p>
-${robots.error ? `<p>${escapeHtml(robots.error)}</p>` : ''}
-${robots.preview ? `<pre>${escapeHtml(robots.preview)}</pre>` : ''}
-<h2>sitemap.xml</h2>
-<p>${sitemap.available ? 'Доступен' : 'Недоступен'} · HTTP ${sitemap.status_code ?? '—'} · ${sitemap.size_bytes ?? 0} байт<br>${escapeHtml(sitemap.url || '')}</p>
-${sitemap.error ? `<p>${escapeHtml(sitemap.error)}</p>` : ''}
-${sitemap.preview ? `<pre>${escapeHtml(sitemap.preview)}</pre>` : ''}
-</body>
-</html>`;
+${techFileSection('robots.txt', robots)}
+${techFileSection('sitemap.xml', sitemap)}
+</div>`;
     }
 
-    function downloadFullReport() {
-        if (!lastAudit) return;
-        downloadBlob(
-            reportFilename(lastAudit, 'html'),
-            buildFullReportHtml(lastAudit),
-            'text/html;charset=utf-8'
-        );
+    function techFileSection(label, file) {
+        const raw = (file && (file.content || file.preview)) || '';
+        return `
+<h2>${escapeHtml(label)}</h2>
+<p>${file && file.available ? 'Доступен' : 'Недоступен'} · HTTP ${file && file.status_code != null ? file.status_code : '—'} · ${file && file.size_bytes != null ? file.size_bytes : 0} байт<br>${escapeHtml((file && file.url) || '')}</p>
+${file && file.error ? `<p>${escapeHtml(file.error)}</p>` : ''}
+${raw ? `<pre>${escapeHtml(raw)}</pre>` : '<p>Содержимое не получено.</p>'}`;
     }
 
     function downloadPdf() {
-        const element = document.getElementById('pdf-export-root') || document.getElementById('results-container');
-        if (!element || !lastAudit) return;
-
-        const hiddenEls = document.querySelectorAll('.no-print, header.no-print');
-        hiddenEls.forEach((el) => el.classList.add('pdf-hidden'));
+        if (!lastAudit || typeof html2pdf === 'undefined') return;
+        const button = document.getElementById('download-pdf-button');
+        const host = document.createElement('div');
+        host.setAttribute('aria-hidden', 'true');
+        host.style.cssText = 'position:fixed;left:0;top:0;width:760px;background:#fff;z-index:-1;pointer-events:none;';
+        host.innerHTML = buildFullReportHtml(lastAudit);
+        document.body.appendChild(host);
+        if (button) button.disabled = true;
 
         const opt = {
-            margin: 10,
-            filename: 'SEO-Audit.pdf',
-            image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2, useCORS: true, logging: false },
+            margin: [10, 10, 10, 10],
+            filename: reportFilename(lastAudit, 'pdf'),
+            image: { type: 'jpeg', quality: 0.95 },
+            html2canvas: { scale: 1.5, useCORS: true, logging: false, backgroundColor: '#ffffff' },
             jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-            pagebreak: { mode: ['css', 'legacy'] }
+            pagebreak: { mode: ['css', 'legacy'], avoid: ['.block', 'h2'] }
         };
 
-        html2pdf().set(opt).from(element).save().finally(() => {
-            hiddenEls.forEach((el) => el.classList.remove('pdf-hidden'));
+        html2pdf().set(opt).from(host).save().finally(() => {
+            host.remove();
+            if (button) button.disabled = false;
         });
     }
 
